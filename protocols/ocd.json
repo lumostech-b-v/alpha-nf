@@ -1,0 +1,30 @@
+[
+  {
+    "protocol": "M1: Frontal De-Chatter (High-Beta↓ + Alpha↑)",
+    "channel": "Fz",
+    "reward": "9–12 Hz (adjust to PAF)",
+    "inhibit": "22–30 Hz + 4–7 Hz",
+    "note": "Core OCD"
+  },
+  {
+    "protocol": "M2: SMR Inhibitory Control (Stability / Sleep / Compulsions)",
+    "channel": "C4",
+    "reward": "12–15 Hz",
+    "inhibit": "2–7 Hz + 20–30 Hz",
+    "note": "Good starter/stabilizer; blends well with M1."
+  },
+  {
+    "protocol": "M3: Fronto-Executive Control (Mid-Beta↑ with High-Beta↓)",
+    "channel": "Fz",
+    "reward": "15–18 Hz",
+    "inhibit": "22–30 Hz + 4–7 Hz",
+    "note": "Reduce hyperarousal, pain amplification, stress reactivity"
+  },
+  {
+    "protocol": "M4: Alpha-Theta Relaxation",
+    "channel": "Pz",
+    "reward": "(4-7 Hz) / (8-12 Hz)",
+    "inhibit": "22-30 Hz",
+    "note": ""
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "protocol": "M1: SMR Training for Pain Modulation",
+    "channel": "Cz",
+    "reward": "12–15 Hz (SMR)",
+    "inhibit": "4–8 Hz + 22–30 Hz",
+    "note": "Stabilize sensory-motor processing, reduce somatic pain perception"
+  },
+  {
+    "protocol": "M2: Alpha Enhancement for Relaxation",
+    "channel": "Pz",
+    "reward": "8–12 Hz (adjust to PAF)",
+    "inhibit": "22-30 Hz",
+    "note": "Increase cortical relaxation, reduce cortical hyperexcitability (migraine prevention)"
+  },
+  {
+    "protocol": "M3: High-beta Down-train (Pain Hyperarousal Reduction)",
+    "channel": "Fz",
+    "reward": "9–12 Hz",
+    "inhibit": "22–30 Hz",
+    "note": "Reduce hyperarousal, pain amplification, stress reactivity"
+  },
+  {
+    "protocol": "M4: Frontal Theta Control (Pain Rumination Reduction)",
+    "channel": "Fz",
+    "reward": "15–18 Hz",
+    "inhibit": "4–7 Hz + 22-30 Hz",
+    "note": "Reduce pain-related cognitive rumination and helplessness"
+  }
+]

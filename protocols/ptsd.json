@@ -1,0 +1,30 @@
+[
+  {
+    "protocol": "M1: Hyperarousal Calming",
+    "channel": "Fz",
+    "reward": "8–12 Hz (alpha)",
+    "inhibit": "22–30 Hz",
+    "note": "Core PTSD; Reduce vigilance, downshift frontal overdrive"
+  },
+  {
+    "protocol": "M2: SMR Sleep Stabilization",
+    "channel": "C4",
+    "reward": "12–15 Hz",
+    "inhibit": "2–7 Hz + 22–30 Hz",
+    "note": "Improve sleep spindles, reduce nightmares, stabilize baseline"
+  },
+  {
+    "protocol": "M3: Fronto-Trauma Intrusion Modulation (Frontal Theta↓)",
+    "channel": "Fz",
+    "reward": "15–18 Hz",
+    "inhibit": "4–7 Hz + 22–30 Hz",
+    "note": "Reduce flashbacks, improve cognitive inhibition of intrusive memory"
+  },
+  {
+    "protocol": "M4: Posterior Alpha Enhancement (Relaxation/Calm)",
+    "channel": "Pz",
+    "reward": "8–12 Hz (center on PAF)",
+    "inhibit": "22-30 Hz",
+    "note": "Strengthen sensory disengagement, support calm states."
+  }
+]

@@ -1,0 +1,30 @@
+[
+  {
+    "protocol": "M1: Calm-Arousal (Alpha-Up / High-Beta-Down)",
+    "channel": "Fz",
+    "reward": "8-12 Hz",
+    "inhibit": "22-30 Hz + 2-7 Hz",
+    "note": "Classic Anxiety"
+  },
+  {
+    "protocol": "M2: SMR-Stability (Sleep/Anxiety)",
+    "channel": "Cz",
+    "reward": "12-15 Hz",
+    "inhibit": "2-7 Hz + 20-30 Hz",
+    "note": "Helps stabilize anxiety with insomnia/somatic tension"
+  },
+  {
+    "protocol": "M3: Alpha-Theta Relaxation (Trauma / Deep Calm)",
+    "channel": "Pz",
+    "reward": "(4-7 Hz) / (8-12 Hz)",
+    "inhibit": "22-30 Hz",
+    "note": "Avoid early if hyperarousal very high (risk of dissociation)"
+  },
+  {
+    "protocol": "M4: Frontal Balancing (Depression Comorbidity)",
+    "channel": "F3",
+    "reward": "15–18 Hz",
+    "inhibit": "8-12 Hz",
+    "note": "Only introduce after Calm-Arousal blocks show stabilization"
+  }
+]

@@ -1,0 +1,235 @@
+{
+  "adhd": [
+    {
+      "protocol": "M1: TBR-Normalize (attention/inattention.)",
+      "channel": "Cz",
+      "reward": "15-18 Hz",
+      "inhibit": "4-7 Hz + 22-30 Hz",
+      "note": "Classic High TBR"
+    },
+    {
+      "protocol": "M2: SMR-Stability (Sleep/Anxiety stabilizer.)",
+      "channel": "Cz",
+      "reward": "12-15 Hz",
+      "inhibit": "2-7 Hz + 20-30 Hz",
+      "note": "Great first phase if anxiety/insomnia present."
+    },
+    {
+      "protocol": "M3: Frontal-Executive Beta-Up (exec boost.)",
+      "channel": "Fz",
+      "reward": "15-20 Hz",
+      "inhibit": "2–7 Hz + 25–35 Hz",
+      "note": "If Anxiety high, interleave M2 blocks, (better focus, Mental effort)"
+    },
+    {
+      "protocol": "M4: Alpha-Calm (calm adjunct.)",
+      "channel": "Fz",
+      "reward": "9–12 Hz",
+      "inhibit": "22–30 Hz",
+      "note": "Supportive; don’t replace ADHD core unless needed"
+    }
+  ],
+  "anxiety": [
+    {
+      "protocol": "M1: Calm-Arousal (Alpha-Up / High-Beta-Down)",
+      "channel": "Fz",
+      "reward": "8-12 Hz (centered on individual PAF)",
+      "inhibit": "22-30 Hz",
+      "note": "Classic Anxiety"
+    },
+    {
+      "protocol": "M2: SMR-Stability (Sleep/Anxiety)",
+      "channel": "Cz",
+      "reward": "12-15 Hz",
+      "inhibit": "2-7 Hz + 20-30 Hz",
+      "note": "Helps stabilize anxiety with insomnia/somatic tension"
+    },
+    {
+      "protocol": "M3: Alpha-Theta Relaxation (Trauma / Deep Calm)",
+      "channel": "Pz",
+      "reward": "Theta/Alpha ↑",
+      "inhibit": ">20Hz",
+      "note": "Avoid early if hyperarousal very high (risk of dissociation)"
+    },
+    {
+      "protocol": "M4: Frontal Balancing (Depression Comorbidity)",
+      "channel": "F3",
+      "reward": "15–18 Hz",
+      "inhibit": "22–30 Hz",
+      "note": "Only introduce after Calm-Arousal blocks show stabilization"
+    }
+  ],
+  "depression": [
+    {
+      "protocol": "M1: Alpha Assymetry (Frontal Activation)",
+      "channel": "F3",
+      "reward": "15-18 Hz",
+      "inhibit": "8-12 Hz",
+      "note": "Classic Assymetry"
+    },
+    {
+      "protocol": "M2: Calm-Arousal (Alpha-up / High-beta-down)",
+      "channel": "CZ",
+      "reward": "8-12 Hz",
+      "inhibit": "22-30 Hz",
+      "note": "Interleave M1 when anxiety is prominent"
+    },
+    {
+      "protocol": "M3: SMR-Stability (Sleep/Anxiety stabilizer.)",
+      "channel": "C4",
+      "reward": "12-15 Hz",
+      "inhibit": "2–7 Hz + 20–30 Hz",
+      "note": "First blocks for STABILIZATION / Sleep problem"
+    },
+    {
+      "protocol": "M4: Alpha-Theta (Deep relaxation / emotional processing)",
+      "channel": "Pz",
+      "reward": "Raise Theta/Alpha ratio",
+      "inhibit": ">20 Hz",
+      "note": "trauma_intrusion↑, Refractory rumination"
+    }
+  ],
+  "insomnia": [
+    {
+      "protocol": "M1: SMR Sleep-Spindle Training",
+      "channel": "C4",
+      "reward": "12-15 Hz",
+      "inhibit": "2-7 Hz (drowsy) + 20-30 Hz (Arousal)",
+      "note": "Strongest evidence base for insomnia"
+    },
+    {
+      "protocol": "M2: Frontal Hyperarousal Calming",
+      "channel": "Fz",
+      "reward": "9-12 Hz (center on PAF if available)",
+      "inhibit": "22-30 Hz",
+      "note": "Lowers Arousal"
+    },
+    {
+      "protocol": "M3: Anxiety Comorbidity (Hybrid)",
+      "channel": "Fz",
+      "reward": "8–12 Hz",
+      "inhibit": "20-30",
+      "note": "Add cautiously; insomnia focus stays SMR."
+    },
+    {
+      "protocol": "M4: Depression Comorbidity (Hybrid)",
+      "channel": "F3",
+      "reward": "15-18 Hz",
+      "inhibit": "Alpha/High Beta",
+      "note": "Add cautiously; insomnia focus stays SMR."
+    },
+    {
+      "protocol": "M5: Alpha-Theta Relaxation",
+      "channel": "Pz",
+      "reward": "Theta/Alpha ↑",
+      "inhibit": ">20Hz",
+      "note": "Insomnia with Hyper Arousal"
+    }
+  ],
+  "migraine": [
+    {
+      "protocol": "M1: SMR Training for Pain Modulation",
+      "channel": "Cz",
+      "reward": "12–15 Hz (SMR)",
+      "inhibit": "4–7 Hz + 22–30 Hz",
+      "note": "Stabilize sensory-motor processing, reduce somatic pain perception"
+    },
+    {
+      "protocol": "M2: Alpha Enhancement for Relaxation",
+      "channel": "Pz / O1 / O2",
+      "reward": "8–12 Hz (adjust to PAF)",
+      "inhibit": ">20 Hz",
+      "note": "Increase cortical relaxation, reduce cortical hyperexcitability (migraine prevention)"
+    },
+    {
+      "protocol": "M3: High-beta Down-train (Pain Hyperarousal Reduction)",
+      "channel": "Fz / F3 / T3",
+      "reward": "9–12 Hz",
+      "inhibit": "22–30 Hz",
+      "note": "Reduce hyperarousal, pain amplification, stress reactivity"
+    },
+    {
+      "protocol": "M4: Frontal Theta Control (Pain Rumination Reduction)",
+      "channel": "Fz",
+      "reward": "15–18 Hz",
+      "inhibit": "4–7 Hz",
+      "note": "Reduce pain-related cognitive rumination and helplessness"
+    }
+  ],
+  "ocd": [
+    {
+      "protocol": "M1: Frontal De-Chatter (High-Beta↓ + Alpha↑)",
+      "channel": "Fz",
+      "reward": "9–12 Hz (adjust to PAF)",
+      "inhibit": "22–30 Hz + 4–7 Hz",
+      "note": "Core OCD"
+    },
+    {
+      "protocol": "M2: SMR Inhibitory Control (Stability / Sleep / Compulsions)",
+      "channel": "C4",
+      "reward": "12–15 Hz",
+      "inhibit": "2–7 Hz + 20–30 Hz",
+      "note": "Good starter/stabilizer; blends well with M1."
+    },
+    {
+      "protocol": "M3: Fronto-Executive Control (Mid-Beta↑ with High-Beta↓)",
+      "channel": "Fz",
+      "reward": "15–18 Hz",
+      "inhibit": "22–30 Hz + 4–7 Hz",
+      "note": "Reduce hyperarousal, pain amplification, stress reactivity"
+    },
+    {
+      "protocol": "M4: Alpha-Theta Relaxation",
+      "channel": "Pz",
+      "reward": "Theta/Alpha ↑",
+      "inhibit": ">20Hz",
+      "note": ""
+    }
+  ],
+  "ptsd": [
+    {
+      "protocol": "M1: Hyperarousal Calming",
+      "channel": "Fz",
+      "reward": "8–12 Hz (alpha)",
+      "inhibit": "22–30 Hz",
+      "note": "Core PTSD; Reduce vigilance, downshift frontal overdrive"
+    },
+    {
+      "protocol": "M2: SMR Sleep Stabilization",
+      "channel": "C4",
+      "reward": "12–15 Hz",
+      "inhibit": "2–7 Hz + 20–30 Hz",
+      "note": "Improve sleep spindles, reduce nightmares, stabilize baseline"
+    },
+    {
+      "protocol": "M3: Fronto-Trauma Intrusion Modulation (Frontal Theta↓)",
+      "channel": "Fz",
+      "reward": "15–18 Hz",
+      "inhibit": "4–7 Hz + 22–30 Hz",
+      "note": "Reduce flashbacks, improve cognitive inhibition of intrusive memory"
+    },
+    {
+      "protocol": "M4: Posterior Alpha Enhancement (Relaxation/Calm)",
+      "channel": "Pz/O1/O2",
+      "reward": "8–12 Hz (center on PAF)",
+      "inhibit": ">20 Hz",
+      "note": "Strengthen sensory disengagement, support calm states."
+    },
+    {
+      "protocol": "M5: Alpha-Theta Relaxation",
+      "channel": "Pz",
+      "reward": "Theta/Alpha ↑",
+      "inhibit": ">20Hz",
+      "note": ""
+    }
+  ],
+  "theta_beta_ratio": [
+    {
+      "protocol": "Theta/Beta Ratio Training",
+      "channel": "Cz",
+      "reward": "theta/beta ratio",
+      "inhibit": "",
+      "note": "Training to reduce theta/beta ratio, commonly used for ADHD protocols. This computes the ratio of theta power to beta power and aims to decrease this ratio."
+    }
+  ]
+}

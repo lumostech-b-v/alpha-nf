@@ -1,0 +1,138 @@
+{
+    "ADHD": {
+      "QEEG_Finding": [
+        "TBR ↑",
+        "SMR ↓",
+        "High-Beta ↑"
+      ],
+      "Disorder_Tests": [
+        "RS/Conners",
+        "Sleep (ISI)",
+        "Anxiety (GAD-7)",
+        "Depression (PHQ-9)",
+        "WM Score"
+      ],
+      "Observation": [
+        "Processing Speed Problem",
+        "Inattention"
+      ]
+    },
+  
+    "Depression": {
+      "QEEG_Finding": [
+        "Frontal Alpha Asymmetry",
+        "Frontal Beta ↓",
+        "High-Beta ↑",
+        "Slow Peak Alpha"
+      ],
+      "Disorder_Tests": [
+        "Depression (PHQ-9)",
+        "Anxiety (GAD-7)",
+        "Sleep (ISI)"
+      ],
+      "Observation": [
+        "Rumination",
+        "Trauma Intrusion",
+        "Psychomotor Restlessness",
+        "Executive Control Problem"
+      ]
+    },
+  
+    "Anxiety (GAD)": {
+      "QEEG_Finding": [
+        "Alpha ↓",
+        "High Beta ↑",
+        "SMR ↓",
+        "Slow Peak Alpha"
+      ],
+      "Disorder_Tests": [
+        "Anxiety (GAD-7)",
+        "Sleep (ISI)",
+        "Depression (PHQ-9)"
+      ],
+      "Observation": [
+        "Trauma Intrusion",
+        "Tension"
+      ]
+    },
+  
+    "Insomnia": {
+      "QEEG_Finding": [
+        "SMR ↓",
+        "High Beta ↑",
+        "Alpha ↓",
+        "Alpha/Theta ↑"
+      ],
+      "Disorder_Tests": [
+        "Sleep (ISI)",
+        "Anxiety (GAD-7)",
+        "Depression (PHQ-9)"
+      ],
+      "Observation": [
+        "Fatigue Problem",
+        "Sleep-Onset Latency",
+        "Hyper Arousal"
+      ]
+    },
+  
+    "Migraine": {
+      "QEEG_Finding": [
+        "High Beta ↑",
+        "Alpha ↓",
+        "Theta ↑",
+        "SMR ↓"
+      ],
+      "Disorder_Tests": [
+        "Sleep (ISI)",
+        "Anxiety (GAD-7)",
+        "Depression (PHQ-9)"
+      ],
+      "Observation": [
+        "Over Focus",
+        "Hyper Arousal",
+        "Rumination"
+      ]
+    },
+  
+    "OCD": {
+      "QEEG_Finding": [
+        "High Beta ↑",
+        "Alpha ↓",
+        "SMR ↓",
+        "Frontal Theta ↑"
+      ],
+      "Disorder_Tests": [
+        "Y-BOCS",
+        "Anxiety (GAD-7)",
+        "Depression (PHQ-9)",
+        "Sleep (ISI)"
+      ],
+      "Observation": [
+        "Intrusive Chatter",
+        "Executive Inflexibility",
+        "Rumination",
+        "Compulsive Tension"
+      ]
+    },
+  
+    "PTSD": {
+      "QEEG_Finding": [
+        "High Beta ↑",
+        "Frontal Theta ↑",
+        "Alpha ↓",
+        "SMR ↓",
+        "Alpha/Theta ↑"
+      ],
+      "Disorder_Tests": [
+        "CAPS-5",
+        "Sleep (ISI)"
+      ],
+      "Observation": [
+        "Hyper Arousal",
+        "Trauma",
+        "Rumination",
+        "Emotional Dysregulation"
+      ]
+    }
+  }
+  

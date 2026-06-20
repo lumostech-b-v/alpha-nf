@@ -1,0 +1,30 @@
+[
+  {
+    "protocol": "M1: TBR-Normalize (attention/inattention.)",
+    "channel": "Cz",
+    "reward": "-",
+    "inhibit": "(4-8 Hz) / (15-18 Hz)",
+    "note": "Classic High TBR"
+  },
+  {
+    "protocol": "M2: SMR-Stability (Sleep/Anxiety stabilizer.)",
+    "channel": "Cz",
+    "reward": "12-15 Hz",
+    "inhibit": "2-7 Hz + 20-30 Hz",
+    "note": "Great first phase if anxiety/insomnia present."
+  },
+  {
+    "protocol": "M3: Frontal-Executive Beta-Up (exec boost.)",
+    "channel": "Fz",
+    "reward": "15-20 Hz",
+    "inhibit": "2–7 Hz + 25–35 Hz",
+    "note": "If Anxiety high, interleave M2 blocks, (better focus, Mental effort)"
+  },
+  {
+    "protocol": "M4: Alpha-Calm (calm adjunct.)",
+    "channel": "Fz",
+    "reward": "8–12 Hz",
+    "inhibit": "22–30 Hz + 2-7 Hz",
+    "note": "Supportive; don’t replace ADHD core unless needed"
+  }
+]

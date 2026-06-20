@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(Get-Command *)",
+      "PowerShell(Get-ChildItem \"C:\\\\Users\\\\farha\" -Directory | Select-Object Name; $env:PATH -split \";\" | Where-Object { $_ -ne \"\" } | Select-Object -First 20)",
+      "PowerShell($url = \"https://nodejs.org/dist/v22.16.0/node-v22.16.0-x64.msi\"; $out = \"$env:TEMP\\\\node-installer.msi\"; Write-Host \"Downloading Node.js LTS...\"; Invoke-WebRequest -Uri $url -OutFile $out; Write-Host \"Download complete: $out\")",
+      "PowerShell(Write-Host \"Installing Node.js \\(this may take a minute\\)...\"; Start-Process msiexec.exe -ArgumentList \"/i `\"$env:TEMP\\\\node-installer.msi`\" /qn /norestart\" -Wait -PassThru | Select-Object ExitCode)",
+      "PowerShell(npm *)",
+      "PowerShell($result = Start-Process msiexec.exe -ArgumentList \"/i `\"$env:TEMP\\\\node-installer.msi`\" /qn /norestart\" -Wait -PassThru -Verb RunAs; Write-Host \"Exit code: $\\($result.ExitCode\\)\")",
+      "PowerShell($env:PATH = [System.Environment]::GetEnvironmentVariable\\(\"PATH\", \"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\", \"User\"\\); & \"C:\\\\Program Files\\\\nodejs\\\\node.exe\" --version; & \"C:\\\\Program Files\\\\nodejs\\\\npm.cmd\" --version)",
+      "PowerShell(npm install *)",
+      "Skill(run)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell($env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd C:\\\\Users\\\\farha\\\\Downloads\\\\neuro-feedback-dev\\\\pyServer; .\\\\.venv\\\\Scripts\\\\activate; uvicorn app.core.main:app --reload' -WindowStyle Normal; Write-Host \"Backend window launched\")",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-Command', '$env:PATH = \"C:\\\\Program Files\\\\nodejs;\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"Machine\"\\) + \";\" + [System.Environment]::GetEnvironmentVariable\\(\"PATH\",\"User\"\\); cd C:\\\\Users\\\\farha\\\\Downloads\\\\neuro-feedback-dev\\\\frontend; & \"C:\\\\Program Files\\\\nodejs\\\\npm.cmd\" run dev' -WindowStyle Normal; Write-Host \"Frontend window launched\")",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd C:\\\\Users\\\\farha\\\\Downloads\\\\neuro-feedback-dev\\\\pyServer; .\\\\.venv\\\\Scripts\\\\activate; uvicorn app.core.main:app --reload' -WindowStyle Normal; Write-Host \"Backend window launched\")",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\\\Users\\\\farha\\\\Downloads\\\\neuro-feedback-dev\\\\run-frontend.ps1' -WindowStyle Normal; Write-Host \"Frontend launched\")",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', 'cd C:\\\\Users\\\\farha\\\\Downloads\\\\neuro-feedback-dev\\\\pyServer; .\\\\.venv\\\\Scripts\\\\activate; uvicorn app.core.main:app --reload' -WindowStyle Normal; Write-Host \"Backend launched\")",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-ExecutionPolicy', 'Bypass', '-File', 'C:\\\\Users\\\\farha\\\\Downloads\\\\neuro-feedback-dev\\\\run-frontend.ps1' -WindowStyle Normal; Start-Process powershell -ArgumentList '-NoExit', '-ExecutionPolicy', 'Bypass', '-Command', 'cd C:\\\\Users\\\\farha\\\\Downloads\\\\neuro-feedback-dev\\\\pyServer; .\\\\.venv\\\\Scripts\\\\activate; uvicorn app.core.main:app --reload' -WindowStyle Normal; Write-Host \"Both launched\")",
+      "PowerShell(Get-Process *)",
+      "PowerShell($url = \"https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe\"; $out = \"$env:TEMP\\\\git-installer.exe\"; Write-Host \"Downloading Git...\"; Invoke-WebRequest -Uri $url -OutFile $out; Write-Host \"Done\")",
+      "PowerShell(Write-Host \"Installing Git...\"; Start-Process \"$env:TEMP\\\\git-installer.exe\" -ArgumentList \"/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=icons,ext\\\\reg\\\\shellhere,assoc,assoc_sh\" -Wait; Write-Host \"Done\")",
+      "PowerShell(git *)"
+    ]
+  }
+}

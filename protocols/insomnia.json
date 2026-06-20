@@ -1,0 +1,30 @@
+[
+  {
+    "protocol": "M1: SMR Sleep-Spindle Training",
+    "channel": "C4",
+    "reward": "12-15 Hz",
+    "inhibit": "4-8 Hz (drowsy) + 20-30 Hz (Arousal)",
+    "note": "Strongest evidence base for insomnia"
+  },
+  {
+    "protocol": "M2: Frontal Hyperarousal Calming",
+    "channel": "Fz",
+    "reward": "9-12 Hz (center on PAF if available)",
+    "inhibit": "22-30 Hz",
+    "note": "Lowers Arousal"
+  },
+  {
+    "protocol": "M3: Anxiety Comorbidity (Hybrid)",
+    "channel": "Fz",
+    "reward": "8–12 Hz",
+    "inhibit": "22-30 Hz",
+    "note": "Add cautiously; insomnia focus stays SMR."
+  },
+  {
+    "protocol": "M4: Depression Comorbidity (Hybrid)",
+    "channel": "F3",
+    "reward": "15-18 Hz",
+    "inhibit": "8-12 Hz + 22-30 Hz",
+    "note": "Add cautiously; insomnia focus stays SMR."
+  }
+]

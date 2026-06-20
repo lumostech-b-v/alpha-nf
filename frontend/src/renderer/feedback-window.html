@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Neurofeedback</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <!-- Vendored locally so the app works offline (see src/renderer/vendor/). -->
+    <script defer src="vendor/lucide.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: #000000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            overflow: hidden;
+        }
+        
+        .feedback-window-container {
+            width: 100%;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: var(--spacing-xl, 20px);
+            position: relative;
+        }
+        
+        .feedback-image-container {
+            width: 100%;
+            max-width: 800px;
+            height: 70vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            border-radius: 12px;
+            overflow: hidden;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        }
+        
+        .feedback-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: filter 0.3s ease;
+            /* Initial blur - will be updated dynamically */
+            filter: blur(20px);
+        }
+        
+        .feedback-overlay {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to top, rgba(0, 0, 0, 0.7), transparent);
+            padding: 30px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
+
+        .feedback-status-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: linear-gradient(to bottom, rgba(0, 0, 0, 0.7), transparent);
+            padding: 20px 30px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+        }
+        
+        .feedback-value-display {
+            text-align: center;
+        }
+        
+        .feedback-value-number {
+            font-size: 72px;
+            font-weight: 700;
+            color: #ffffff;
+            line-height: 1;
+            text-shadow: 0 2px 10px rgba(0, 0, 0, 0.5);
+            margin-bottom: 10px;
+        }
+        
+        .feedback-value-label {
+            font-size: 18px;
+            color: rgba(255, 255, 255, 0.9);
+            text-transform: uppercase;
+            letter-spacing: 3px;
+            font-weight: 500;
+        }
+        
+        .feedback-status {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 24px;
+            background: rgba(255, 255, 255, 0.2);
+            backdrop-filter: blur(10px);
+            border-radius: 25px;
+            font-size: 16px;
+            color: #ffffff;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+        
+        .feedback-status .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.5);
+            transition: background-color 0.3s ease;
+            box-shadow: 0 0 10px rgba(255, 255, 255, 0.5);
+        }
+        
+        .feedback-status.baseline .status-indicator {
+            background: #ff9800;
+            box-shadow: 0 0 10px rgba(255, 152, 0, 0.7);
+        }
+        
+        .feedback-status.training .status-indicator {
+            background: #4CAF50;
+            box-shadow: 0 0 10px rgba(76, 175, 80, 0.7);
+        }
+
+        .blur-indicator {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            background: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            color: #ffffff;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .puzzle-container {
+            width: 100%;
+            height: 100%;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 8px;
+            padding: 40px;
+        }
+
+        .puzzle-piece {
+            aspect-ratio: 1;
+            border-radius: 12px;
+            transition: all 0.3s ease;
+            border: 3px solid transparent;
+        }
+
+        .lamp-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            height: 100%;
+            padding: 60px;
+            background-color: #0a0a0a;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .lamp-ambient-light {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle at center, rgba(255, 200, 100, 0) 0%, rgba(0, 0, 0, 0.8) 70%);
+            transition: opacity 0.4s ease;
+            pointer-events: none;
+        }
+
+        .lamp-base {
+            width: 100px;
+            height: 30px;
+            background-color: #1a1a1a;
+            border-radius: 8px;
+            margin-bottom: 0;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
+            position: relative;
+            z-index: 3;
+        }
+
+        .lamp-stand {
+            width: 8px;
+            height: 120px;
+            background-color: #2a2a2a;
+            margin-bottom: 0;
+            position: relative;
+            z-index: 2;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+        }
+
+        .lamp-socket {
+            width: 50px;
+            height: 25px;
+            background-color: #1a1a1a;
+            border-radius: 12px 12px 4px 4px;
+            margin-bottom: 0;
+            position: relative;
+            z-index: 2;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+        }
+
+        .lamp-bulb-container {
+            position: relative;
+            width: 140px;
+            height: 140px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 0;
+            z-index: 2;
+        }
+
+        .lamp-bulb-glow {
+            position: absolute;
+            width: 140px;
+            height: 140px;
+            border-radius: 50%;
+            transition: all 0.4s ease;
+            pointer-events: none;
+        }
+
+        .lamp-bulb {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background-color: #1a1a1a;
+            transition: all 0.4s ease;
+            position: relative;
+            overflow: hidden;
+            border: 2px solid rgba(100, 100, 100, 0.3);
+        }
+
+        .lamp-filament {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 30px;
+            background-color: #ffaa00;
+            border-radius: 2px;
+            transition: all 0.4s ease;
+            opacity: 0;
+            box-shadow: 0 0 8px rgba(255, 200, 100, 0);
+        }
+
+        .lamp-shade {
+            width: 180px;
+            height: 80px;
+            background-color: #2a2a2a;
+            border-radius: 90px 90px 20px 20px;
+            margin-top: -20px;
+            position: relative;
+            z-index: 1;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(100, 100, 100, 0.2);
+        }
+
+        .lamp-shade-glow {
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 100%;
+            height: 40px;
+            border-radius: 90px 90px 0 0;
+            transition: all 0.4s ease;
+            pointer-events: none;
+        }
+
+        .blue-dot-container {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: #000000;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .blue-dot {
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, rgba(255, 255, 255, 0.8), #3b82f6);
+            box-shadow: 0 0 20px rgba(59, 130, 246, 0.6), 0 0 40px rgba(59, 130, 246, 0.4);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.05);
+            }
+        }
+
+        .blue-dot-ring {
+            position: absolute;
+            border-radius: 50%;
+            border: 2px solid rgba(59, 130, 246, 0.5);
+            pointer-events: none;
+            animation: ripple 2s ease-out infinite;
+        }
+
+        @keyframes ripple {
+            0% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            100% {
+                transform: scale(2);
+                opacity: 0;
+            }
+        }
+
+        .blue-dot-particles {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .blue-dot-particle {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            border-radius: 50%;
+            background-color: rgba(59, 130, 246, 0.8);
+            pointer-events: none;
+        }
+
+        .feedback-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            transform-origin: center center;
+        }
+    </style>
+</head>
+<body>
+    <div class="feedback-window-container">
+        <div class="feedback-image-container">
+            <img id="feedbackImage" class="feedback-image" src="assets/images/feedback-placeholder.jpg" alt="Neurofeedback Image">
+            <!-- <div id="feedbackPuzzle" class="puzzle-container" style="display: none;"></div> -->
+            <div id="feedbackLamp" class="lamp-container" style="display: none;">
+                <div class="lamp-ambient-light"></div>
+                <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; width: 100%; height: 100%; padding: 40px; position: relative; z-index: 1;">
+                    <div class="lamp-base"></div>
+                    <div class="lamp-stand"></div>
+                    <div class="lamp-socket"></div>
+                    <div class="lamp-bulb-container">
+                        <div class="lamp-bulb-glow"></div>
+                        <div class="lamp-bulb">
+                            <div class="lamp-filament"></div>
+                        </div>
+                    </div>
+                    <div class="lamp-shade">
+                        <div class="lamp-shade-glow"></div>
+                    </div>
+                </div>
+            </div>
+            <div id="feedbackBlueDot" class="blue-dot-container" style="display: none;">
+                <div class="blue-dot-particles" id="blueDotParticles"></div>
+                <div class="blue-dot" id="blueDot"></div>
+            </div>
+            <video id="feedbackVideo" class="feedback-video" style="display: none;" loop muted autoplay>
+                <source src="../../assets/131403-750559764_medium.mp4" type="video/mp4">
+            </video>
+            <div class="feedback-status-overlay">
+                <div class="feedback-status" id="feedbackStatus">
+                    <div class="status-indicator"></div>
+                    <span>Waiting for feedback...</span>
+                </div>
+            </div>
+            <div class="feedback-overlay">
+                <div class="feedback-value-display">
+                    <div id="feedbackValueNumber" class="feedback-value-number">0.00</div>
+                    <div class="feedback-value-label">Feedback Level</div>
+                </div>
+            </div>
+            <div class="blur-indicator" id="blurIndicator" style="display: none;">Blur: 20px</div>
+        </div>
+    </div>
+
+    <script>
+        let currentFeedbackType = 'Image';
+
+        function setFeedbackType(type) {
+            currentFeedbackType = type || 'Image';
+            const image = document.getElementById('feedbackImage');
+            // const puzzle = document.getElementById('feedbackPuzzle');
+            const lamp = document.getElementById('feedbackLamp');
+            const blueDot = document.getElementById('feedbackBlueDot');
+            const video = document.getElementById('feedbackVideo');
+            const blurIndicator = document.getElementById('blurIndicator');
+            
+            // Hide all feedback types immediately
+            if (image) image.style.display = 'none';
+            // if (puzzle) puzzle.style.display = 'none';
+            if (lamp) lamp.style.display = 'none';
+            if (blueDot) blueDot.style.display = 'none';
+            if (video) {
+                video.style.display = 'none';
+                video.pause();
+            }
+            if (blurIndicator) blurIndicator.style.display = 'none';
+            
+            // Show selected feedback type immediately
+            // if (currentFeedbackType === 'Puzzle') {
+            //     if (puzzle) {
+            //         puzzle.style.display = 'grid';
+            //         initializePuzzle(puzzle);
+            //     }
+            // } else 
+            if (currentFeedbackType === 'Lamp') {
+                if (lamp) {
+                    lamp.style.display = 'flex';
+                    // Initialize with current value if available
+                    const valueNumber = document.getElementById('feedbackValueNumber');
+                    const currentValue = valueNumber ? parseFloat(valueNumber.textContent) || 0 : 0;
+                    updateLampFeedback(currentValue);
+                }
+            } else if (currentFeedbackType === 'BlueDot') {
+                if (blueDot) {
+                    blueDot.style.display = 'flex';
+                    // Initialize with current value if available
+                    const valueNumber = document.getElementById('feedbackValueNumber');
+                    const currentValue = valueNumber ? parseFloat(valueNumber.textContent) || 0 : 0;
+                    updateBlueDotFeedback(currentValue);
+                }
+            } else if (currentFeedbackType === 'Video') {
+                if (video) {
+                    video.style.display = 'block';
+                    // Initialize with current value if available
+                    const valueNumber = document.getElementById('feedbackValueNumber');
+                    const currentValue = valueNumber ? parseFloat(valueNumber.textContent) || 0 : 0;
+                    updateVideoFeedback(currentValue);
+                    // Play video
+                    video.play().catch(err => console.warn('Video play failed:', err));
+                }
+            } else {
+                // Default: Image
+                if (image) {
+                    image.style.display = 'block';
+                    // Initialize with current value if available
+                    const valueNumber = document.getElementById('feedbackValueNumber');
+                    const currentValue = valueNumber ? parseFloat(valueNumber.textContent) || 0 : 0;
+                    const blur = 20 * (1 - currentValue);
+                    image.style.filter = `blur(${blur}px)`;
+                }
+                if (blurIndicator) blurIndicator.style.display = 'block';
+            }
+        }
+
+        // function initializePuzzle(container) {
+        //     if (container.querySelector('.puzzle-piece')) return; // Already initialized
+        //     
+        //     const imageUrl = 'assets/images/feedback-placeholder.jpg';
+        //     container.innerHTML = '';
+        //     
+        //     const grid = document.createElement('div');
+        //     grid.className = 'puzzle-grid';
+        //     grid.style.display = 'grid';
+        //     grid.style.gridTemplateColumns = 'repeat(3, 1fr)';
+        //     grid.style.width = '100%';
+        //     grid.style.height = '100%';
+        //     grid.style.padding = '40px';
+        //     grid.style.backgroundColor = 'transparent';
+        //     
+        //     // Create 9 puzzle pieces with image slices
+        //     for (let row = 0; row < 3; row++) {
+        //         for (let col = 0; col < 3; col++) {
+        //             const piece = document.createElement('div');
+        //             piece.className = 'puzzle-piece';
+        //             piece.style.backgroundImage = `url(${imageUrl})`;
+        //             piece.style.backgroundSize = '300% 300%'; // Image is 3x larger to show 3x3 grid
+        //             // Calculate position: each column/row is 33.33% of the 300% image
+        //             // So we need to shift by col * 33.33% and row * 33.33%
+        //             const xPos = (col / 2) * 100; // 0%, 50%, 100% for cols 0, 1, 2
+        //             const yPos = (row / 2) * 100; // 0%, 50%, 100% for rows 0, 1, 2
+        //             piece.style.backgroundPosition = `${xPos}% ${yPos}%`;
+        //             piece.style.backgroundRepeat = 'no-repeat';
+        //             piece.style.aspectRatio = '1';
+        //             piece.style.transition = 'all 0.3s ease';
+        //             piece.style.border = '2px solid rgba(255, 255, 255, 0.3)';
+        //             piece.style.borderRadius = '12px';
+        //             piece.style.overflow = 'hidden';
+        //             piece.style.backgroundColor = 'transparent';
+        //             grid.appendChild(piece);
+        //         }
+        //     }
+        //     
+        //     container.appendChild(grid);
+        // }
+
+        // function updatePuzzleFeedback(value) {
+        //     const puzzle = document.getElementById('feedbackPuzzle');
+        //     if (!puzzle) return;
+        //     
+        //     initializePuzzle(puzzle);
+        //     const grid = puzzle.querySelector('.puzzle-grid');
+        //     const pieces = puzzle.querySelectorAll('.puzzle-piece');
+        //     
+        //     // Adjust gap based on feedback value
+        //     // High feedback (close to 1) = small gap (connected)
+        //     // Low feedback (close to 0) = large gap (separated)
+        //     const minGap = 2; // Connected pieces
+        //     const maxGap = 20; // Separated pieces
+        //     const gap = maxGap - (value * (maxGap - minGap));
+        //     
+        //     if (grid) {
+        //         grid.style.gap = `${gap}px`;
+        //     }
+        //     
+        //     // Add shadow/blur effect when separated
+        //     pieces.forEach((piece) => {
+        //         if (value < 0.5) {
+        //             // Separate pieces - add shadow and slight blur
+        //             piece.style.filter = `blur(${(1 - value) * 3}px)`;
+        //             piece.style.boxShadow = `0 0 ${(1 - value) * 15}px rgba(0, 0, 0, 0.5)`;
+        //             piece.style.opacity = 0.7 + (value * 0.3);
+        //         } else {
+        //             // Connect pieces - clear and bright
+        //             piece.style.filter = 'none';
+        //             piece.style.boxShadow = 'none';
+        //             piece.style.opacity = '1';
+        //         }
+        //     });
+        // }
+
+        function updateBlueDotFeedback(value) {
+            // Bigger dot = better performance (reversed from before)
+            // Value ranges from 0 (poor) to 1 (best)
+            // Size ranges from minSize (poor) to maxSize (best)
+            const minSize = 40; // Small dot when performance is poor
+            const maxSize = 250; // Big dot when performance is excellent
+            const size = minSize + value * (maxSize - minSize);
+            
+            const blueDot = document.getElementById('blueDot');
+            const particlesContainer = document.getElementById('blueDotParticles');
+            
+            if (blueDot) {
+                blueDot.style.width = `${size}px`;
+                blueDot.style.height = `${size}px`;
+                
+                // Color gradient changes - brighter/more cyan when better
+                const brightness = 0.5 + value * 0.5;
+                const hueShift = value * 30; // Shift towards cyan when better
+                const baseColor = `hsl(${210 + hueShift}, 70%, ${50 + brightness * 20}%)`;
+                const highlightColor = `rgba(255, 255, 255, ${0.3 + value * 0.5})`;
+                blueDot.style.background = `radial-gradient(circle at 30% 30%, ${highlightColor}, ${baseColor})`;
+                
+                // Dynamic glow intensity - stronger when better
+                const glowIntensity = 0.4 + value * 0.6;
+                const glowSize = size * (0.4 + value * 0.3);
+                blueDot.style.boxShadow = `
+                    0 0 ${glowSize}px rgba(59, 130, 246, ${glowIntensity}),
+                    0 0 ${glowSize * 1.5}px rgba(59, 130, 246, ${glowIntensity * 0.7}),
+                    0 0 ${glowSize * 2.5}px rgba(100, 200, 255, ${glowIntensity * 0.4})
+                `;
+                
+                // Pulsing animation speed - faster when better
+                const pulseSpeed = 2 - (value * 1.5); // Faster pulse when better
+                blueDot.style.animationDuration = `${pulseSpeed}s`;
+                
+                // Add ripple rings when performance is good
+                if (value > 0.6) {
+                    createRippleRing(blueDot, size, value);
+                }
+                
+                // Create particles when performance is excellent
+                if (value > 0.8 && particlesContainer) {
+                    createParticles(particlesContainer, size, value);
+                }
+            }
+        }
+
+        function createRippleRing(parent, size, intensity) {
+            // Remove old rings
+            const existingRings = parent.parentElement.querySelectorAll('.blue-dot-ring');
+            existingRings.forEach(ring => {
+                if (ring !== parent) ring.remove();
+            });
+            
+            // Create new ring
+            const ring = document.createElement('div');
+            ring.className = 'blue-dot-ring';
+            ring.style.width = `${size}px`;
+            ring.style.height = `${size}px`;
+            ring.style.left = '50%';
+            ring.style.top = '50%';
+            ring.style.transform = 'translate(-50%, -50%)';
+            ring.style.borderWidth = `${2 + intensity * 3}px`;
+            ring.style.borderColor = `rgba(59, 130, 246, ${0.3 + intensity * 0.4})`;
+            ring.style.animationDuration = `${2 - intensity * 1}s`;
+            
+            parent.parentElement.appendChild(ring);
+            
+            // Remove ring after animation
+            setTimeout(() => {
+                if (ring.parentElement) ring.remove();
+            }, 2000);
+        }
+
+        function createParticles(container, size, intensity) {
+            // Limit number of particles
+            const existingParticles = container.querySelectorAll('.blue-dot-particle');
+            if (existingParticles.length > 20) return;
+            
+            const particleCount = Math.floor(intensity * 8);
+            const centerX = 50; // Percentage
+            const centerY = 50; // Percentage
+            
+            for (let i = 0; i < particleCount; i++) {
+                const particle = document.createElement('div');
+                particle.className = 'blue-dot-particle';
+                
+                const angle = (Math.PI * 2 * i) / particleCount;
+                const distance = size * 0.6;
+                const x = centerX + (Math.cos(angle) * distance / window.innerWidth * 100);
+                const y = centerY + (Math.sin(angle) * distance / window.innerHeight * 100);
+                
+                particle.style.left = `${x}%`;
+                particle.style.top = `${y}%`;
+                particle.style.opacity = '0';
+                particle.style.transform = 'scale(0)';
+                
+                container.appendChild(particle);
+                
+                // Animate particle
+                setTimeout(() => {
+                    particle.style.transition = 'all 1s ease-out';
+                    particle.style.opacity = '1';
+                    particle.style.transform = 'scale(1)';
+                    
+                    const finalX = centerX + (Math.cos(angle) * distance * 1.5 / window.innerWidth * 100);
+                    const finalY = centerY + (Math.sin(angle) * distance * 1.5 / window.innerHeight * 100);
+                    
+                    setTimeout(() => {
+                        particle.style.left = `${finalX}%`;
+                        particle.style.top = `${finalY}%`;
+                        particle.style.opacity = '0';
+                        
+                        setTimeout(() => {
+                            if (particle.parentElement) particle.remove();
+                        }, 1000);
+                    }, 100);
+                }, i * 50);
+            }
+        }
+
+        function updateVideoFeedback(value) {
+            const video = document.getElementById('feedbackVideo');
+            if (!video) return;
+            
+            // Scale video from 0% (small) to 100% (full) based on feedback value
+            // Value ranges from 0 (poor) to 1 (best)
+            // Scale ranges from 0.1 (10% - small) to 1.0 (100% - full)
+            const minScale = 0.1; // 10% when feedback is 0
+            const maxScale = 1.0; // 100% when feedback is 1
+            const scale = minScale + value * (maxScale - minScale);
+            
+            video.style.transform = `scale(${scale})`;
+            video.style.opacity = 0.5 + value * 0.5; // Fade in as value increases
+        }
+
+        function updateLampFeedback(value) {
+            const brightness = Math.max(0, Math.min(1, value));
+            
+            // Update ambient light
+            const ambientLight = document.querySelector('.lamp-ambient-light');
+            if (ambientLight) {
+                const ambientIntensity = brightness * 0.3;
+                const ambientColor = brightness < 0.3 
+                    ? `rgba(255, 150, 50, ${ambientIntensity})` 
+                    : brightness < 0.7 
+                    ? `rgba(255, 200, 120, ${ambientIntensity})` 
+                    : `rgba(255, 240, 200, ${ambientIntensity})`;
+                ambientLight.style.background = `radial-gradient(circle at center, ${ambientColor} 0%, rgba(0, 0, 0, ${0.8 - brightness * 0.3}) 70%)`;
+            }
+            
+            // Update bulb glow
+            const bulbGlow = document.querySelector('.lamp-bulb-glow');
+            if (bulbGlow) {
+                const glowSize = 80 + (brightness * 120);
+                const glowIntensity = brightness * 0.6;
+                // Color temperature: warm orange when dim, bright white when bright
+                const glowColor = brightness < 0.3 
+                    ? `rgba(255, 150, 50, ${glowIntensity})` 
+                    : brightness < 0.7 
+                    ? `rgba(255, 200, 120, ${glowIntensity})` 
+                    : `rgba(255, 240, 200, ${glowIntensity})`;
+                bulbGlow.style.boxShadow = `0 0 ${glowSize}px ${glowColor}, 0 0 ${glowSize * 1.5}px ${glowColor}`;
+                bulbGlow.style.opacity = brightness > 0.1 ? '1' : '0';
+            }
+            
+            // Update bulb
+            const bulb = document.querySelector('.lamp-bulb');
+            if (bulb) {
+                const bulbBrightness = brightness;
+                // Color temperature gradient
+                const bulbColor = brightness < 0.3 
+                    ? `rgba(255, 150, 50, ${bulbBrightness * 0.7})` 
+                    : brightness < 0.7 
+                    ? `rgba(255, 200, 120, ${bulbBrightness * 0.8})` 
+                    : `rgba(255, 240, 220, ${bulbBrightness * 0.9})`;
+                
+                bulb.style.backgroundColor = bulbColor;
+                bulb.style.boxShadow = `inset 0 0 ${30 + brightness * 40}px rgba(255, 200, 100, ${brightness * 0.5}), 0 0 ${20 + brightness * 30}px rgba(255, 200, 100, ${brightness * 0.3})`;
+                bulb.style.borderColor = brightness > 0.1 ? `rgba(200, 150, 100, ${brightness * 0.5})` : 'rgba(100, 100, 100, 0.3)';
+            }
+            
+            // Update filament
+            const filament = document.querySelector('.lamp-filament');
+            if (filament) {
+                const filamentBrightness = brightness;
+                filament.style.opacity = filamentBrightness > 0.05 ? String(filamentBrightness) : '0';
+                const filamentColor = brightness < 0.5 
+                    ? `rgba(255, 150, 50, ${filamentBrightness})` 
+                    : `rgba(255, 220, 150, ${filamentBrightness})`;
+                filament.style.backgroundColor = filamentColor;
+                filament.style.boxShadow = `0 0 ${8 + brightness * 12}px ${filamentColor}, 0 0 ${4 + brightness * 6}px rgba(255, 200, 100, ${filamentBrightness * 0.8})`;
+            }
+            
+            // Update lampshade glow
+            const shadeGlow = document.querySelector('.lamp-shade-glow');
+            if (shadeGlow) {
+                const shadeIntensity = brightness * 0.4;
+                const shadeColor = brightness < 0.3 
+                    ? `rgba(255, 150, 50, ${shadeIntensity})` 
+                    : brightness < 0.7 
+                    ? `rgba(255, 200, 120, ${shadeIntensity})` 
+                    : `rgba(255, 240, 200, ${shadeIntensity})`;
+                shadeGlow.style.background = `radial-gradient(ellipse at center, ${shadeColor} 0%, transparent 100%)`;
+                shadeGlow.style.opacity = brightness > 0.1 ? '1' : '0';
+            }
+            
+            // Update lampshade itself (subtle glow from inside)
+            const lampshade = document.querySelector('.lamp-shade');
+            if (lampshade && brightness > 0.1) {
+                const shadeGlowColor = brightness < 0.5 
+                    ? `rgba(255, 150, 50, ${brightness * 0.15})` 
+                    : `rgba(255, 220, 150, ${brightness * 0.2})`;
+                lampshade.style.boxShadow = `0 8px 16px rgba(0, 0, 0, 0.6), inset 0 -20px 40px ${shadeGlowColor}`;
+            } else if (lampshade) {
+                lampshade.style.boxShadow = '0 8px 16px rgba(0, 0, 0, 0.6)';
+            }
+        }
+
+        function updateFeedback(value, phaseMessage, feedbackType) {
+            const isBaseline = phaseMessage && phaseMessage.toLowerCase().includes('baseline');
+            const displayValue = isBaseline ? 0.0 : Math.max(0, Math.min(1, value));
+            
+            if (feedbackType) {
+                setFeedbackType(feedbackType);
+            }
+            
+            const status = document.getElementById('feedbackStatus');
+            const indicator = status.querySelector('.status-indicator');
+            const text = status.querySelector('span');
+            const image = document.getElementById('feedbackImage');
+            const valueNumber = document.getElementById('feedbackValueNumber');
+            const blurIndicator = document.getElementById('blurIndicator');
+            
+            // Update status
+            status.classList.remove('baseline', 'training');
+            if (isBaseline) {
+                status.classList.add('baseline');
+                indicator.style.backgroundColor = '#ff9800';
+                text.textContent = phaseMessage || 'Taking baseline';
+            } else {
+                status.classList.add('training');
+                indicator.style.backgroundColor = '#4CAF50';
+                text.textContent = phaseMessage || 'Training in progress';
+            }
+            
+            // Update feedback display based on type
+            // if (currentFeedbackType === 'Puzzle') {
+            //     updatePuzzleFeedback(displayValue);
+            // } else 
+            if (currentFeedbackType === 'Lamp') {
+                updateLampFeedback(displayValue);
+            } else if (currentFeedbackType === 'BlueDot') {
+                updateBlueDotFeedback(displayValue);
+            } else if (currentFeedbackType === 'Video') {
+                updateVideoFeedback(displayValue);
+            } else {
+                // Default: Image with blur
+                const blur = 20 * (1 - displayValue);
+                if (image) image.style.filter = `blur(${blur}px)`;
+                if (blurIndicator) blurIndicator.textContent = `Blur: ${blur.toFixed(1)}px`;
+            }
+            
+            if (valueNumber) valueNumber.textContent = displayValue.toFixed(2);
+        }
+
+        // Listen for feedback type changes
+        if (window.electronAPI?.onFeedbackTypeChange) {
+            window.electronAPI.onFeedbackTypeChange(setFeedbackType);
+        }
+
+        window.electronAPI.onFeedbackUpdate(updateFeedback);
+        updateFeedback(0, 'Waiting for feedback...');
+    </script>
+</body>
+</html>

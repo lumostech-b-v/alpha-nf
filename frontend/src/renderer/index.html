@@ -1,0 +1,941 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Alpha Neurofeedback</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <!-- Vendored locally so the app works offline (see src/renderer/vendor/). -->
+    <script src="vendor/chart.umd.js"></script>
+    <script src="vendor/axios.min.js"></script>
+    <script defer src="vendor/lucide.min.js"></script>
+</head>
+<body>
+    <!-- App Loading Screen -->
+    <div id="appLoadingScreen" class="app-loading-screen">
+        <div class="app-loading-content">
+            <div class="app-loading-logo">
+                <h1>Alpha Neurofeedback</h1>
+            </div>
+            <div class="app-loading-spinner">
+                <div class="spinner-ring"></div>
+                <div class="spinner-ring"></div>
+                <div class="spinner-ring"></div>
+            </div>
+            <p class="app-loading-text">Initializing application...</p>
+        </div>
+    </div>
+
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen" style="display: none;">
+        <div class="login-container login-container-simple">
+            <div class="login-header">
+                <div class="login-icon-wrapper">
+                    <img src="../../assets/logo-black.png" alt="Alpha Neurofeedback" class="login-logo">
+                </div>
+                <h1 class="login-title">Alpha Neurofeedback</h1>
+            </div>
+            
+            <div class="login-form-wrapper">
+                <button type="button" class="btn btn-login-simple" id="createDefaultUserBtn">
+                    <span class="btn-text">
+                        <span class="btn-icon">→</span>
+                        <span>Login to System</span>
+                    </span>
+                    <span class="btn-spinner" style="display: none;">
+                        <span class="spinner-small"></span>
+                        <span>Logging in...</span>
+                    </span>
+                </button>
+            </div>
+            
+            <div class="login-footer">
+                <p>Version 2.0.0</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- App Container -->
+    <div id="app" style="display: none;">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-left">
+                <h1 class="logo" id="headerLogo">Alpha Neurofeedback</h1>
+                <div class="connection-status" id="connectionStatus">
+                    <span class="status-indicator" id="statusIndicator"></span>
+                    <span class="status-text" id="statusText">Disconnected</span>
+                </div>
+            </div>
+            <div class="header-right">
+                <button class="header-btn" id="themeToggleBtn" title="Toggle Theme" aria-label="Toggle between light and dark theme">
+                    <span class="icon" data-lucide="sun"></span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Sidebar Navigation -->
+        <nav class="sidebar" id="sidebar" role="navigation" aria-label="Main navigation">
+            <div class="nav-items">
+                <button class="nav-item active" data-view="dashboard" aria-label="Go to Dashboard" role="menuitem">
+                    <span class="icon" data-lucide="layout-dashboard" aria-hidden="true"></span>
+                    <span class="nav-item-text">Dashboard</span>
+                </button>
+                <button class="nav-item" data-view="protocol-library" aria-label="Go to Protocol Library" role="menuitem">
+                    <span class="icon" data-lucide="library" aria-hidden="true"></span>
+                    <span class="nav-item-text">Protocol Library</span>
+                </button>
+                <button class="nav-item" data-view="sessions" aria-label="Go to Sessions Management" role="menuitem">
+                    <span class="icon" data-lucide="activity" aria-hidden="true"></span>
+                    <span class="nav-item-text">Sessions</span>
+                </button>
+                <button class="nav-item" data-view="settings" aria-label="Go to Settings" role="menuitem">
+                    <span class="icon" data-lucide="settings-2" aria-hidden="true"></span>
+                    <span class="nav-item-text">Settings</span>
+                </button>
+            </div>
+            
+            <!-- Selected Patient Info -->
+            <div class="nav-section patient-info-section" id="patientInfoSection" style="display: none;">
+            </div>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content" id="mainContent">
+            
+            <!-- Dashboard View -->
+            <div class="view active" id="dashboard-view">
+                
+                <!-- Quick Actions -->
+                <!-- <div class="quick-actions-grid"> -->
+                <!--     <button class="quick-action-card" id="quickStartSession"> -->
+                <!--         <div class="qa-icon" data-lucide="play-circle"></div> -->
+                <!--         <h3>Start New Session</h3> -->
+                <!--         <p>Begin a neurofeedback session with a patient</p> -->
+                <!--     </button> -->
+                <!--     <button class="quick-action-card" id="quickManagePatients"> -->
+                <!--         <div class="qa-icon" data-lucide="user-plus"></div> -->
+                <!--         <h3>Manage Patients</h3> -->
+                <!--         <p>View and manage your patient list</p> -->
+                <!--     </button> -->
+                <!--     <button class="quick-action-card" id="quickViewSessions"> -->
+                <!--         <div class="qa-icon" data-lucide="file-text"></div> -->
+                <!--         <h3>View All Sessions</h3> -->
+                <!--         <p>Browse and analyze session records</p> -->
+                <!--     </button> -->
+                <!-- </div> -->
+
+                <!-- Stats Grid -->
+                <div class="stats-grid" style="display:none">
+                    <div class="stat-card">
+                        <div class="stat-icon" data-lucide="users"></div>
+                        <div class="stat-content">
+                            <div class="stat-label">Total Patients</div>
+                            <div class="stat-number" id="totalPatients">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" data-lucide="activity"></div>
+                        <div class="stat-content">
+                            <div class="stat-label">Active Sessions</div>
+                            <div class="stat-number" id="activeSessions">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" data-lucide="check-circle-2"></div>
+                        <div class="stat-content">
+                            <div class="stat-label">Completed Today</div>
+                            <div class="stat-number" id="completedSessions">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" data-lucide="calendar"></div>
+                        <div class="stat-content">
+                            <div class="stat-label">Total Sessions</div>
+                            <div class="stat-number" id="totalSessions">0</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Recent Patients -->
+                <div class="dashboard-section">
+                    <div class="section-header">
+                        <h3>Recent Patients</h3>
+                        <button class="btn btn-primary" id="dashboardNewPatientBtn">New Patient</button>
+                    </div>
+                    <div class="patient-cards-grid" id="recentPatientsGrid">
+                        <div class="empty-state-card">
+                            <p>No patients found. Create your first patient to get started.</p>
+                            <button class="btn btn-primary" id="dashboardAddPatient">Add Patient</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- All Patients Table (Collapsible) -->
+                <div class="dashboard-section">
+                    <div class="section-header">
+                        <h3>All Patients</h3>
+                        <button class="btn-link toggle-btn" id="togglePatientsTable">
+                            <span class="toggle-label">View All</span>
+                            <span class="toggle-icon" data-lucide="chevron-down"></span>
+                        </button>
+                    </div>
+                    <div class="table-container collapsible-content" id="patientsTableContainer" style="display: none;">
+                        <div class="table-toolbar" id="patientsTableToolbar">
+                            <div class="table-search">
+                                <span class="icon" data-lucide="search" aria-hidden="true"></span>
+                                <input 
+                                    type="text" 
+                                    id="patientsTableSearch" 
+                                    placeholder="Search by name, phone, or ID" 
+                                    aria-label="Search patients"
+                                    autocomplete="off"
+                                />
+                            </div>
+                            <div class="table-toolbar-actions">
+                                <label for="patientsTablePageSize">Rows</label>
+                                <select id="patientsTablePageSize" aria-label="Rows per page">
+                                    <option value="10">10</option>
+                                    <option value="25">25</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </div>
+                        </div>
+                        <table class="data-table" id="patientsTable">
+                            <thead>
+                                <tr>
+                                    <th>ID</th>
+                                    <th>Name</th>
+                                    <th>Phone</th>
+                                    <th>Age</th>
+                                    <th>Sessions</th>
+                                    <th>Last Session</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr class="empty-state">
+                                    <td colspan="7">No patients found</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="table-footer" id="patientsTableFooter">
+                            <div class="table-info" id="patientsTableInfo">Showing 0 patients</div>
+                            <div class="table-pagination">
+                                <button type="button" class="pagination-btn" id="patientsTablePrev" disabled>
+                                    <span class="icon" data-lucide="chevron-left"></span>
+                                    Previous
+                                </button>
+                                <button type="button" class="pagination-btn" id="patientsTableNext" disabled>
+                                    Next
+                                    <span class="icon" data-lucide="chevron-right"></span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Protocol Library View -->
+            <div class="view" id="protocol-library-view">
+                <div class="view-header">
+                    <h2>Protocol Library</h2>
+                    <div class="view-actions">
+                        <button class="btn btn-primary" id="addProtocolBtn">
+                            <span class="icon" data-lucide="plus" aria-hidden="true"></span>
+                            Add Protocol
+                        </button>
+                    </div>
+                </div>
+                <div class="dashboard-section">
+                    <div id="protocolsListContainer">
+                        <div class="empty-state-card">
+                            <p>Loading protocols...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Session View -->
+            <div class="view" id="live-session-view">
+                <div class="view-header">
+                    <h2>Live Session</h2>
+                    <div class="view-actions">
+                        <button class="btn btn-primary" id="startSessionBtn">Choose patient</button>
+                        <button class="btn btn-secondary" id="stopSessionBtn" style="display: none;">Stop Session</button>
+                    </div>
+                </div>
+                
+                <div class="session-setup" id="sessionSetup">
+                    <div class="setup-form">
+                        <div class="form-group">
+                            <label>Select Patient</label>
+                            <select id="sessionPatientSelect" class="form-control">
+                                <option value="">Choose a patient...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Protocol Type</label>
+                            <div class="form-group-row">
+                                <select id="protocolTypeSelect" class="form-control">
+                                    <option value="">Select a patient first...</option>
+                                </select>
+                                <button type="button" class="btn btn-secondary" id="newProtocolBtn">New Protocol</button>
+                            </div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Channels</label>
+                            <div class="multi-select" id="channelsSelect"></div>
+                        </div>
+                        
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Session Rounds</label>
+                                <input type="number" id="sessionRoundsInput" class="form-control" value="3" min="1" max="10">
+                            </div>
+                            <div class="form-group">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="session-active" id="sessionActive" style="display: none;">
+                    <div class="session-info">
+                        <div class="session-timer" id="sessionTimer">00:00</div>
+                        <div class="session-details" id="sessionDetails"></div>
+                    </div>
+                    
+                    <div class="feedback-display">
+                        <div class="feedback-value" id="feedbackValue">0.00</div>
+                        <div class="feedback-label">Feedback Score</div>
+                    </div>
+                    
+                    <div class="realtime-charts">
+                        <div class="chart-row">
+                            <div class="chart-container">
+                                <canvas id="eegChart" width="400" height="200"></canvas>
+                            </div>
+                            <div class="chart-container">
+                                <canvas id="bandpowerChart" width="400" height="200"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-container full-width">
+                            <canvas id="featureAmplitudeChart" width="800" height="150"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sessions Management View -->
+            <div class="view" id="sessions-view">
+                <div class="view-header">
+                    <h2>Session Management</h2>
+                    <div class="view-actions">
+                        <button class="btn btn-primary" id="addSessionBtn">New Session</button>
+                        <button class="btn btn-secondary" id="exportSessionsBtn">Export All</button>
+                    </div>
+                </div>
+                
+                <!-- Session Statistics -->
+                <div class="session-stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon" data-lucide="activity"></div>
+                        <div class="stat-content">
+                            <div class="stat-label">Active Sessions</div>
+                            <div class="stat-number" id="activeSessionsCount">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" data-lucide="check-circle-2"></div>
+                        <div class="stat-content">
+                            <div class="stat-label">Completed Today</div>
+                            <div class="stat-number" id="completedTodayCount">0</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" data-lucide="trending-up"></div>
+                        <div class="stat-content">
+                            <div class="stat-label">Avg Success Rate</div>
+                            <div class="stat-number" id="avgSuccessRate">0%</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Advanced Filters -->
+                <div class="filters-section">
+                    <h3>Filters & Search</h3>
+                    <div class="filters-grid">
+                        <div class="filter-group">
+                            <label>Patient</label>
+                            <select id="sessionFilterPatient" class="form-control">
+                                <option value="">All Patients</option>
+                            </select>
+                        </div>
+                        <div class="filter-group">
+                            <label>Protocol</label>
+                            <select id="sessionFilterProtocol" class="form-control">
+                                <option value="">All Protocols</option>
+                                <option value="TBR">TBR (Theta/Beta Ratio)</option>
+                                <option value="Alpha">Alpha Enhancement</option>
+                                <option value="Beta">Beta Training</option>
+                            </select>
+                        </div>
+                        <div class="filter-group filter-group-dates">
+                            <label>Date Range</label>
+                            <div class="date-range-inputs">
+                                <input type="date" id="sessionFilterStartDate" class="form-control" aria-label="Start date">
+                                <span class="date-range-sep">→</span>
+                                <input type="date" id="sessionFilterEndDate" class="form-control" aria-label="End date">
+                            </div>
+                        </div>
+                        <div class="filter-group">
+                            <label>Search</label>
+                            <input type="text" id="sessionSearchInput" class="form-control" placeholder="Search sessions...">
+                        </div>
+                    </div>
+                    <div class="filter-actions">
+                        <button class="btn btn-secondary" id="clearFiltersBtn">Clear Filters</button>
+                        <button class="btn btn-primary" id="applyFiltersBtn">Apply Filters</button>
+                    </div>
+                </div>
+                
+                <!-- Sessions Table -->
+                <div class="table-container">
+                    <div class="table-header">
+                        <h3>Sessions</h3>
+                        <div class="table-actions">
+                            <span class="results-count" id="sessionResultsCount">0 sessions</span>
+                        </div>
+                    </div>
+                    <table class="data-table" id="sessionsTable">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Patient</th>
+                                <th>Protocol</th>
+                                <th>Start Time</th>
+                                <th>Notes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="empty-state">
+                                <td colspan="5">No sessions found</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                
+            </div>
+
+            <!-- Reports View -->
+            <div class="view" id="reports-view">
+                <div class="view-header">
+                    <h2>Reports & Analytics</h2>
+                </div>
+                
+                <div class="reports-grid">
+                    <div class="report-card">
+                        <h3>Session Statistics</h3>
+                        <canvas id="sessionStatsChart" width="400" height="200"></canvas>
+                    </div>
+                    
+                    <div class="report-card">
+                        <h3>Patient Progress</h3>
+                        <canvas id="patientProgressChart" width="400" height="200"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Settings View -->
+            <div class="view" id="settings-view">
+                <div class="view-header">
+                    <h2>Settings</h2>
+                </div>
+                
+                <div class="settings-sections">
+                    <div class="settings-section">
+                        <h3><span class="settings-section-icon" data-lucide="plug-zap"></span>Backend Connection</h3>
+                        <div class="form-group">
+                            <label>API URL</label>
+                            <input type="text" id="apiUrlInput" class="form-control" value="http://localhost:8000">
+                        </div>
+                        <div class="form-group">
+                            <label>WebSocket URL</label>
+                            <input type="text" id="wsUrlInput" class="form-control" value="ws://localhost:8000/sp/nfcore_start">
+                        </div>
+                        <button class="btn btn-primary" id="testConnectionBtn">Test Connection</button>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3><span class="settings-section-icon" data-lucide="activity"></span>EEG Configuration</h3>
+                        <div class="form-group">
+                            <label>Sample Rate (Hz)</label>
+                            <input type="number" id="sampleRateInput" class="form-control" value="250">
+                        </div>
+                        <div class="form-group">
+                            <label>Default Channels</label>
+                            <input type="text" id="defaultChannelsInput" class="form-control"
+                                   value='["Fp1", "Fp2", "F3", "F4", "C3", "C4", "Cz", "Pz"]'>
+                        </div>
+                    </div>
+
+                    <div class="settings-section">
+                        <h3><span class="settings-section-icon" data-lucide="sliders-horizontal"></span>Application</h3>
+                        <div class="form-group">
+                            <label>Theme</label>
+                            <select id="themeSelect" class="form-control">
+                                <option value="light">Light</option>
+                                <option value="dark">Dark</option>
+                            </select>
+                        </div>
+                        <div class="form-group settings-row-inline">
+                            <label for="autoSyncCheck">Auto-sync</label>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="autoSyncCheck" checked>
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <div class="form-group">
+                            <button class="btn btn-danger" id="logoutBtn">
+                                <span class="icon" data-lucide="log-out" style="width: 16px; height: 16px; margin-right: 8px;"></span>
+                                Logout
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modals -->
+    <!-- User Modal -->
+    <div class="modal" id="userModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="userModalTitle">Add Doctor</h3>
+                <button class="modal-close" id="userModalClose">&times;</button>
+            </div>
+            <form id="userForm">
+                <div class="form-group">
+                    <label>First Name</label>
+                    <input type="text" id="userFirstName" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Last Name</label>
+                    <input type="text" id="userLastName" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Username</label>
+                    <input type="text" id="userUsername" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Email</label>
+                    <input type="email" id="userEmail" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" id="userPassword" class="form-control" required>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="userCancelBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Patient Modal -->
+    <div class="modal" id="patientModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="patientModalTitle">Add Patient</h3>
+                <button class="modal-close" id="patientModalClose">&times;</button>
+            </div>
+            <form id="patientForm">
+                <div class="form-group">
+                    <label>First Name</label>
+                    <input type="text" id="patientFirstName" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Last Name</label>
+                    <input type="text" id="patientLastName" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Phone Number</label>
+                    <input type="tel" id="patientPhone" class="form-control">
+                </div>
+                <div class="form-group">
+                    <label>Date of Birth</label>
+                    <input type="date" id="patientDateOfBirth" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label>Gender</label>
+                    <select id="patientGender" class="form-control">
+                        <option value="">Not specified</option>
+                        <option value="true">Female</option>
+                        <option value="false">Male</option>
+                    </select>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="patientCancelBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Session Detail Modal -->
+    <div class="modal" id="sessionDetailModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3>Session Details</h3>
+                <button class="modal-close" id="sessionDetailModalClose">&times;</button>
+            </div>
+            <div class="modal-body" id="sessionDetailBody">
+                <!-- Content will be dynamically populated -->
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="btn btn-secondary" id="sessionDetailCloseBtn">Close</button>
+                <button type="button" class="btn btn-primary" id="exportSessionBtn">Export Session</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Protocol Modal -->
+    <div class="modal" id="protocolModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Create New Protocol</h3>
+                <button class="modal-close" id="protocolModalClose">&times;</button>
+            </div>
+            <form id="protocolForm">
+                <div class="modal-body">
+                    <div class="form-group">
+                        <label>Protocol Name *</label>
+                        <input type="text" id="protocolName" class="form-control" required>
+                    </div>
+                    <div class="form-group">
+                        <label>Notes</label>
+                        <textarea id="protocolNotes" class="form-control" rows="2"></textarea>
+                    </div>
+                    
+                    <h4>Protocol Features</h4>
+                    
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Target Metric</label>
+                            <select id="targetMetric" class="form-control">
+                                <option value="power">Power</option>
+                                <option value="coherence">Coherence</option>
+                                <option value="asymmetry">Asymmetry</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Normalization Method</label>
+                            <select id="normalizationMethod" class="form-control">
+                                <option value="baseline">Baseline</option>
+                                <option value="rolling">Rolling</option>
+                                <option value="none">None</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label>Frequency Bands</label>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="alphaEnabled" checked>
+                                    <span>Alpha</span>
+                                </label>
+                                <div class="frequency-inputs" id="alphaInputs">
+                                    <input type="number" id="alphaMin" class="form-control" value="8" min="0" max="50" step="0.1" placeholder="Min">
+                                    <span>-</span>
+                                    <input type="number" id="alphaMax" class="form-control" value="12" min="0" max="50" step="0.1" placeholder="Max">
+                                    <span>Hz</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="betaEnabled" checked>
+                                    <span>Beta</span>
+                                </label>
+                                <div class="frequency-inputs" id="betaInputs">
+                                    <input type="number" id="betaMin" class="form-control" value="13" min="0" max="50" step="0.1" placeholder="Min">
+                                    <span>-</span>
+                                    <input type="number" id="betaMax" class="form-control" value="30" min="0" max="50" step="0.1" placeholder="Max">
+                                    <span>Hz</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="thetaEnabled">
+                                    <span>Theta</span>
+                                </label>
+                                <div class="frequency-inputs" id="thetaInputs" style="display: none;">
+                                    <input type="number" id="thetaMin" class="form-control" value="4" min="0" max="50" step="0.1" placeholder="Min">
+                                    <span>-</span>
+                                    <input type="number" id="thetaMax" class="form-control" value="8" min="0" max="50" step="0.1" placeholder="Max">
+                                    <span>Hz</span>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="deltaEnabled">
+                                    <span>Delta</span>
+                                </label>
+                                <div class="frequency-inputs" id="deltaInputs" style="display: none;">
+                                    <input type="number" id="deltaMin" class="form-control" value="1" min="0" max="50" step="0.1" placeholder="Min">
+                                    <span>-</span>
+                                    <input type="number" id="deltaMax" class="form-control" value="4" min="0" max="50" step="0.1" placeholder="Max">
+                                    <span>Hz</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="protocolCancelBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Protocol</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Session Creation Modal -->
+    <div class="modal" id="sessionModal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h3 id="sessionModalTitle">Create New Session</h3>
+                <button class="modal-close" id="sessionModalClose">&times;</button>
+            </div>
+            <form id="sessionForm">
+                <div class="modal-body">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Patient *</label>
+                            <select id="modalSessionPatientSelect" class="form-control" required>
+                                <option value="">Select a patient...</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Protocol Type *</label>
+                            <select id="sessionProtocolSelect" class="form-control" required>
+                                <option value="TBR">TBR (Theta/Beta Ratio)</option>
+                                <option value="Alpha">Alpha Enhancement</option>
+                                <option value="Beta">Beta Training</option>
+                            </select>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Channels *</label>
+                            <div class="multi-select" id="sessionChannelsSelect"></div>
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Sample Rate (Hz)</label>
+                            <input type="number" id="sessionSampleRate" class="form-control" value="250" min="100" max="1000">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Session Rounds</label>
+                            <input type="number" id="sessionRounds" class="form-control" value="3" min="1" max="10">
+                        </div>
+                        
+                        <div class="form-group">
+                        </div>
+                        
+                        <div class="form-group full-width">
+                            <label>Doctor Notes</label>
+                            <textarea id="sessionDoctorNotes" class="form-control" rows="3" placeholder="Optional notes about this session..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn btn-secondary" id="sessionCancelBtn">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Create Session</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Session Process Window -->
+    <div class="session-process-window" id="sessionProcessWindow" style="display: none;">
+        <div class="session-process-container">
+            <div class="session-process-header">
+                <button class="session-close-button" id="sessionProcessClose" title="Close Session">
+                    <span data-lucide="x"></span>
+                </button>
+                <div class="session-process-info">
+                    <h1 id="sessionProcessTitle">Neurofeedback Session</h1>
+                </div>
+            </div>
+            
+            <div class="session-process-body">
+                <!-- Current Session Step -->
+					<div class="current-session-step" id="currentSessionStep">
+						<div class="session-step-content">
+							<h2 id="currentSessionStepTitle">Patient File Creation</h2>
+							<p id="currentSessionStepDescription">Create a new patient file and set up initial parameters.</p>
+						</div>
+					</div>
+            </div>
+            
+            <!-- Session Bottom Navigation -->
+            <div class="session-bottom-nav">
+                <!-- Session Progress Line - Left Side -->
+                <div class="session-progress-line" id="sessionProgressLine">
+                    <div class="session-step active" data-step="1">
+                        <div class="session-step-indicator"></div>
+                        <div class="session-step-name" id="step1Name">Patient File</div>
+                    </div>
+                    
+                    <div class="session-step" data-step="2">
+                        <div class="session-step-indicator"></div>
+                        <div class="session-step-name">Planning</div>
+                    </div>
+                    
+                    <div class="session-step" data-step="3">
+                        <div class="session-step-indicator"></div>
+                        <div class="session-step-name">Preparation</div>
+                    </div>
+                    
+                    <div class="session-step" data-step="4">
+                        <div class="session-step-indicator"></div>
+                        <div class="session-step-name">Recording</div>
+                    </div>
+                    
+                    <div class="session-step" data-step="5">
+                        <div class="session-step-indicator"></div>
+                        <div class="session-step-name">Analysis</div>
+                    </div>
+                </div>
+                
+                <!-- Navigation Buttons - Right Side -->
+                <div class="session-nav-buttons">
+                    <button class="btn btn-secondary" id="prevSessionStepBtn" style="display: none;">Previous</button>
+                    <button class="btn btn-primary" id="nextSessionStepBtn">Next Step</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay" style="display: none;">
+        <div class="loading-spinner"></div>
+    </div>
+
+    <!-- Notification Container -->
+    <div class="notification-container" id="notificationContainer"></div>
+
+    <!-- Core JavaScript -->
+    <!-- API Modules (load before main API.js) -->
+    <script src="js/core/api/UserAPI.js"></script>
+    <script src="js/core/api/AuthAPI.js"></script>
+    <script src="js/core/api/PatientAPI.js"></script>
+    <script src="js/core/api/SessionAPI.js"></script>
+    <script src="js/core/api/AssessmentAPI.js"></script>
+    <script src="js/core/api/ProtocolAPI.js"></script>
+    <script src="js/core/api/SignalProcessingAPI.js"></script>
+    <script src="js/core/api/WebSocketAPI.js"></script>
+    <script src="js/core/api/AnalyticsAPI.js"></script>
+    <script src="js/core/api/ExportAPI.js"></script>
+    <script src="js/core/api/DashboardAPI.js"></script>
+    <script src="js/core/API.js"></script>
+    <script src="js/core/WebSocketManager.js"></script>
+    <script src="js/core/AuthManager.js"></script>
+    
+    <!-- UI Controller Modules -->
+    <script src="js/core/ui/ui-state.js"></script>
+    <script src="js/core/ui/ui-input-protection.js"></script>
+    <script src="js/core/ui/ui-init.js"></script>
+    <script src="js/core/ui/ui-navigation.js"></script>
+    <script src="js/core/ui/ui-modals.js"></script>
+    <script src="js/core/ui/ui-forms.js"></script>
+    <script src="js/core/ui/ui-channels.js"></script>
+    <script src="js/core/ui/ui-users.js"></script>
+    <script src="js/core/ui/ui-patients.js"></script>
+    
+    <!-- Feature JavaScript - Load before ui-sessions.js that depends on them -->
+    <script src="js/features/PatientProfile.js"></script>
+    <script src="js/features/SessionPlanningPanel.js"></script>
+    <script src="js/features/SessionPreparationPanel.js"></script>
+    <script src="js/features/SessionRecordingPanel.js"></script>
+    <script src="js/features/SessionAnalysisPanel.js"></script>
+    
+    <script src="js/core/ui/ui-sessions.js"></script>
+    <script src="js/core/ui/ui-protocols.js"></script>
+    <script src="js/core/ui/ui-tables.js"></script>
+    <script src="js/core/ui/ui-filters.js"></script>
+    <script src="js/core/ui/ui-system.js"></script>
+    <script src="js/core/ui/ui-theme.js"></script>
+    <script src="js/core/ui/ui-utils.js"></script>
+    <script src="js/core/ui/ui.js"></script>
+    
+    <script src="js/core/NeuroFeedbackApp.js"></script>
+    
+    <!-- Additional Feature JavaScript -->
+    <script src="js/features/FeedbackWindow.js"></script>
+    <script src="js/features/TreatmentPlanManager.js"></script>
+    <script src="js/features/ProtocolLibraryManager.js"></script>
+    <script src="js/features/ProgressVisualization.js"></script>
+    <script src="js/features/CheckpointDecision.js"></script>
+    <script src="js/features/ComprehensiveReporting.js"></script>
+    <script src="js/features/charts.js"></script>
+    <script src="js/features/session-analytics.js"></script>
+    <script src="js/features/assessment-treatment-integration.js"></script>
+    <script src="js/features/protocol-transition.js"></script>
+    <script>
+        // Initialize Lucide icons when DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            if (typeof lucide !== 'undefined' && lucide.createIcons) {
+                setTimeout(() => {
+                    lucide.createIcons();
+                }, 100);
+            }
+        });
+
+        // Hide loading screen when backend is ready or after timeout
+        function hideAppLoadingScreen() {
+            const loadingScreen = document.getElementById('appLoadingScreen');
+            if (loadingScreen && loadingScreen.style.display !== 'none') {
+                loadingScreen.style.opacity = '0';
+                loadingScreen.style.transition = 'opacity 0.3s ease-out';
+                setTimeout(() => {
+                    loadingScreen.style.display = 'none';
+                }, 300);
+            }
+        }
+
+        // Listen for backend ready event from Electron
+        if (window.electronAPI && window.electronAPI.onBackendReady) {
+            window.electronAPI.onBackendReady(() => {
+                console.log('Backend ready, hiding loading screen...');
+                // Small delay to ensure smooth transition to login screen
+                setTimeout(hideAppLoadingScreen, 300);
+            });
+        }
+
+        // Also listen for backend URL (alternative signal that backend is ready)
+        if (window.electronAPI && window.electronAPI.onBackendUrl) {
+            window.electronAPI.onBackendUrl(() => {
+                console.log('Backend URL received, hiding loading screen...');
+                setTimeout(hideAppLoadingScreen, 300);
+            });
+        }
+
+        // Fallback: Hide loading screen after max wait time (8 seconds)
+        setTimeout(() => {
+            hideAppLoadingScreen();
+        }, 8000);
+    </script>
+</body>
+</html>

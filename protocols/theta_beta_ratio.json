@@ -1,0 +1,9 @@
+[
+  {
+    "protocol": "Theta/Beta Ratio Training",
+    "channel": "Cz",
+    "reward": "theta/beta ratio",
+    "inhibit": "",
+    "note": "Training to reduce theta/beta ratio, commonly used for ADHD protocols. This computes the ratio of theta power to beta power and aims to decrease this ratio."
+  }
+]

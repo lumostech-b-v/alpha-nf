@@ -1,0 +1,30 @@
+[
+  {
+    "protocol": "M1: Alpha Assymetry (Left Frontal Activation)",
+    "channel": "F3",
+    "reward": "15-18 Hz",
+    "inhibit": "8-12 Hz",
+    "note": "Classic Assymetry"
+  },
+  {
+    "protocol": "M2: Calm-Arousal (Alpha-up / High-beta-down)",
+    "channel": "CZ",
+    "reward": "8-12 Hz",
+    "inhibit": "22-30 Hz",
+    "note": "Interleave M1 when anxiety is prominent"
+  },
+  {
+    "protocol": "M3: SMR-Stability (Sleep/Anxiety stabilizer.)",
+    "channel": "Cz",
+    "reward": "12-15 Hz",
+    "inhibit": "2–7 Hz + 20–30 Hz",
+    "note": "First blocks for STABILIZATION / Sleep problem"
+  },
+  {
+    "protocol": "M4: Alpha-Theta (Deep relaxation / emotional processing)",
+    "channel": "Pz",
+    "reward": "(4-7 Hz) / (8-12 Hz)",
+    "inhibit": "22-30 Hz",
+    "note": "trauma_intrusion↑, Refractory rumination"
+  }
+]
