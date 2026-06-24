@@ -23,7 +23,10 @@ class SessionRecordingPanel {
     this.sampleRate = 256; // Default sample rate, will be updated from settings
     this.latestSuccessRate = null; // Track the latest overall success rate from feedback
     this.artifactState = { active: false }; // Artifact overlay state for EEG plots
-    
+    this.csvRows = []; // Accumulated per-epoch rows for CSV export
+    this._csvFeedbackCallback = null; // Reference kept so we can deregister it
+    this._csvCurrentRound = 1; // Tracked round number for CSV rows
+
     // Y-axis scaling configuration
     this.yAxisConfig = {
       adaptive: true,
@@ -832,6 +835,26 @@ class SessionRecordingPanel {
         `;
       }
 
+      // Reset CSV buffer and register callbacks to accumulate data rows
+      this.csvRows = [];
+      this._csvCurrentRound = 1;
+      const ws = window.websocket;
+      if (ws) {
+        // Remove any stale callbacks
+        if (this._csvFeedbackCallback && ws.callbacks?.onFeedback) {
+          const idx = ws.callbacks.onFeedback.indexOf(this._csvFeedbackCallback);
+          if (idx > -1) ws.callbacks.onFeedback.splice(idx, 1);
+        }
+        if (this._csvRoundCallback && ws.callbacks?.onRoundStart) {
+          const idx = ws.callbacks.onRoundStart.indexOf(this._csvRoundCallback);
+          if (idx > -1) ws.callbacks.onRoundStart.splice(idx, 1);
+        }
+        this._csvFeedbackCallback = (data) => this.recordCsvRow(data);
+        this._csvRoundCallback = (data) => { this._csvCurrentRound = data.round_number ?? this._csvCurrentRound; };
+        if (ws.callbacks?.onFeedback) ws.callbacks.onFeedback.push(this._csvFeedbackCallback);
+        if (ws.callbacks?.onRoundStart) ws.callbacks.onRoundStart.push(this._csvRoundCallback);
+      }
+
       // Don't start timer yet - wait for data to start streaming
       // Timer will be started when first feedback message with data is received
       this.timerStarted = false;
@@ -1632,6 +1655,19 @@ class SessionRecordingPanel {
       const sessionIdToComplete = this.sessionId;
       this.sessionId = null; // Clear immediately so show() guard never re-triggers startRecording()
 
+      // Deregister CSV accumulation callbacks
+      const wsCallbacks = window.websocket?.callbacks;
+      if (this._csvFeedbackCallback && wsCallbacks?.onFeedback) {
+        const idx = wsCallbacks.onFeedback.indexOf(this._csvFeedbackCallback);
+        if (idx > -1) wsCallbacks.onFeedback.splice(idx, 1);
+        this._csvFeedbackCallback = null;
+      }
+      if (this._csvRoundCallback && wsCallbacks?.onRoundStart) {
+        const idx = wsCallbacks.onRoundStart.indexOf(this._csvRoundCallback);
+        if (idx > -1) wsCallbacks.onRoundStart.splice(idx, 1);
+        this._csvRoundCallback = null;
+      }
+
       // Stop WebSocket session (this will disconnect and trigger device stop command)
       window.websocket?.stopLiveSession?.() || window.ui?.stopLiveSession?.();
       window.charts?.stopRealtimeSimulation();
@@ -1711,9 +1747,15 @@ class SessionRecordingPanel {
             <p style="font-weight:600;font-size:0.95rem;margin:0;line-height:1.4;word-break:break-word;">${protocolName}</p>
           </div>
         </div>
-        <div class="modal-actions" style="padding:12px 24px 24px;display:flex;gap:10px;">
+        <div class="modal-actions" style="padding:12px 24px 8px;display:flex;gap:10px;">
           <button class="btn btn-secondary" style="flex:1;" id="sessionCompleteStayBtn">Stay Here</button>
           <button class="btn btn-primary" style="flex:1;" id="sessionCompleteAnalyticsBtn">View Analytics</button>
+        </div>
+        <div style="padding:0 24px 20px;">
+          <button class="btn btn-secondary" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;" id="sessionCompleteCsvBtn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download Session CSV
+          </button>
         </div>
       </div>`;
 
@@ -1737,6 +1779,68 @@ class SessionRecordingPanel {
     document.getElementById('sessionCompleteStayBtn').addEventListener('click', () => {
       modal.remove();
     });
+
+    document.getElementById('sessionCompleteCsvBtn').addEventListener('click', () => {
+      this.downloadSessionCsv();
+    });
+  }
+
+  // ====================================
+  // CSV EXPORT
+  // ====================================
+
+  recordCsvRow(data) {
+    if (!data || data.type !== 'feedback') return;
+
+    const row = {
+      timestamp: data.timestamp || new Date().toISOString(),
+      session_time_s: data.session_time ?? '',
+      round: this._csvCurrentRound,
+      phase: data.training_phase ?? '',
+      feedback_rate: typeof data.feedback === 'number' ? data.feedback.toFixed(4) : '',
+      overall_success_rate: typeof data.overall_success_rate === 'number' ? data.overall_success_rate.toFixed(4) : '',
+    };
+
+    // Per-feature amplitude (µV) and threshold
+    const features = data.individual_features || {};
+    const thresholds = data.feature_thresholds || {};
+    for (const [name, value] of Object.entries(features)) {
+      row[`${name}_amplitude_uv`] = typeof value === 'number' ? value.toFixed(4) : value;
+      const tInfo = thresholds[name];
+      row[`${name}_threshold_uv`] = tInfo?.threshold != null ? Number(tInfo.threshold).toFixed(4) : '';
+      row[`${name}_success`] = tInfo?.success != null ? (tInfo.success ? 1 : 0) : '';
+    }
+
+    this.csvRows.push(row);
+  }
+
+  downloadSessionCsv() {
+    if (this.csvRows.length === 0) {
+      window.ui?.showNotification?.('No session data to export', 'warning');
+      return;
+    }
+
+    const allKeys = [...new Set(this.csvRows.flatMap(r => Object.keys(r)))];
+    const lines = [
+      allKeys.join(','),
+      ...this.csvRows.map(row =>
+        allKeys.map(k => {
+          const v = row[k] ?? '';
+          const s = String(v);
+          return s.includes(',') || s.includes('"') ? `"${s.replace(/"/g, '""')}"` : s;
+        }).join(',')
+      )
+    ];
+
+    const blob = new Blob([lines.join('\r\n')], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    const patientName = (this.patient ? `${this.patient.first_name}_${this.patient.last_name}` : 'patient').replace(/\s+/g, '_');
+    const dateStr = new Date().toISOString().slice(0, 10);
+    a.href = url;
+    a.download = `session_${patientName}_${dateStr}_#${this.sessionNumber}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   showArtifactAlert(message, artifactType) {

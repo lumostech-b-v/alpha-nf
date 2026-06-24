@@ -20,7 +20,8 @@ class WebSocketManager {
             onError: [],
             onEEGData: [],
             onFeedback: [],
-            onSessionUpdate: []
+            onSessionUpdate: [],
+            onRoundStart: []
         };
     }
 
