@@ -808,7 +808,8 @@ class SessionRecordingPanel {
         default_threshold: settings.default_threshold,
         previous_threshold: settings.previous_threshold,
         threshold_feature: settings.threshold_feature,
-        threshold_percentage: settings.threshold_percentage,
+        reward_threshold_percentage: settings.reward_threshold_percentage,
+        inhibit_threshold_percentage: settings.inhibit_threshold_percentage,
         mapping: settings.mapping,
         startTime: startTime,
         sessionNumber: this.sessionNumber

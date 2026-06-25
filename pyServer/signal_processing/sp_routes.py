@@ -282,8 +282,9 @@ async def nfcore(websocket: WebSocket) -> None:
 
             round_state = build_round_state()
 
-            # Session-level success accumulator (survives round resets)
+            # Session-level success accumulators (survive round resets)
             session_success_history: dict[str, list[float]] = defaultdict(list)
+            session_epoch_history: list[float] = []  # one entry per epoch: 1 if all features won, else 0
 
             # Flag to track if we're waiting for resume command
             waiting_for_resume = False
@@ -546,23 +547,20 @@ async def nfcore(websocket: WebSocket) -> None:
                     if (not round_state["baseline_locked"]
                             and round_elapsed >= baseline_collection_duration):
                         thresholds = {}
-                        # Get threshold percentage from start_command, default to 20%
-                        threshold_percentage = start_command.get("threshold_percentage", 20.0) / 100.0
+                        reward_threshold_pct = start_command.get("reward_threshold_percentage", 20.0) / 100.0
+                        inhibit_threshold_pct = start_command.get("inhibit_threshold_percentage", 20.0) / 100.0
 
                         for feature_name in selected_features:
                             buf = round_state["baseline_buffers"][feature_name]
                             if len(buf) > 0:
                                 baseline_mean = float(np.mean(buf))
 
-                                # Check feature mode to determine threshold calculation
                                 mode = feature_modes.get(feature_name, "enhance")
 
                                 if mode == "inhibit":
-                                    # For inhibit features, threshold should be lower than mean by percentage
-                                    thresholds[feature_name] = baseline_mean * (1 - threshold_percentage)
+                                    thresholds[feature_name] = baseline_mean * (1 - inhibit_threshold_pct)
                                 else:  # enhance mode
-                                    # For enhance features, threshold should be higher than mean by percentage
-                                    thresholds[feature_name] = baseline_mean * (1 + threshold_percentage)
+                                    thresholds[feature_name] = baseline_mean * (1 + reward_threshold_pct)
                             else:
                                 thresholds[feature_name] = float(feature_values.get(feature_name, 0.0))
                         round_state["feature_thresholds"] = thresholds
@@ -570,10 +568,11 @@ async def nfcore(websocket: WebSocket) -> None:
                         round_state["smoothed_thresholds"] = thresholds.copy()
                         round_state["baseline_locked"] = True
                         logger.info(
-                            "Baseline locked after %.1f seconds for round %s with threshold_percentage=%.2f%%",
+                            "Baseline locked after %.1f seconds for round %s (reward=%.0f%%, inhibit=%.0f%%)",
                             round_elapsed,
                             current_round,
-                            start_command.get("threshold_percentage", 20.0),
+                            reward_threshold_pct * 100,
+                            inhibit_threshold_pct * 100,
                         )
 
                     baseline_progress = min(1.0, round_elapsed / baseline_collection_duration) if baseline_collection_duration > 0 else 1.0
@@ -626,59 +625,52 @@ async def nfcore(websocket: WebSocket) -> None:
 
                     mapping_type = start_command.get("mapping", "fixed_threshold")
 
-                    # Overall success rate = average across all features over the whole session so far
-                    all_feature_success_rates = []
-                    for feature_name in selected_features:
-                        history = session_success_history.get(feature_name, [])
-                        if history:
-                            all_feature_success_rates.append(float(np.mean(history)))
-
-                    overall_success_rate = float(np.mean(all_feature_success_rates)) if all_feature_success_rates else 0.0
+                    # Overall success rate = % of epochs where every feature won simultaneously
+                    overall_success_rate = float(np.mean(session_epoch_history)) if session_epoch_history else 0.0
 
                     # Calculate feedback using static thresholds collected during baseline
                     if not round_state["baseline_locked"]:
                         feedback_val = 0.0
                     else:
                         feature_successes = []
+                        feature_binaries = []
+                        valid_features_this_epoch = []
                         for feature_name in selected_features:
                             threshold = round_state["feature_thresholds"].get(feature_name)
                             value = feature_values.get(feature_name)
                             if threshold is None or value is None:
                                 continue
-                                
+
                             mode = feature_modes.get(feature_name, "enhance")
-                            
-                            # Calculate success based on mapping type
+
                             if mapping_type == "sigmoid":
-                                # Use Z-score for smooth mapping
-                                # z = (value - threshold) / threshold
-                                # We use a steeper gain to make it responsive around the threshold
-                                z = z_scores.get(feature_name, 0.0)
-                                if mode == "inhibit":
-                                    z = -z # Invert for inhibit (lower is better)
-                                    
-                                # Sigmoid centered at threshold (z=0 -> 0.5)
-                                success = sigmoid_map(z, gain=5.0, shift=0.0, clip=(0.0, 1.0))
-                                
-                            elif mapping_type == "linear":
-                                # Linear mapping around threshold
                                 z = z_scores.get(feature_name, 0.0)
                                 if mode == "inhibit":
                                     z = -z
-                                    
-                                # Map z-score -1..1 to 0..1 (threshold at 0.5)
+                                success = sigmoid_map(z, gain=5.0, shift=0.0, clip=(0.0, 1.0))
+
+                            elif mapping_type == "linear":
+                                z = z_scores.get(feature_name, 0.0)
+                                if mode == "inhibit":
+                                    z = -z
                                 success = linear_map(z, a=0.5, b=0.5, clip=(0.0, 1.0))
-                                
-                            else: # fixed_threshold
+
+                            else:  # fixed_threshold
                                 if mode == "enhance":
                                     success = 1.0 if value >= threshold else 0.0
                                 else:
                                     success = 1.0 if value <= threshold else 0.0
-                                    
-                            binary = 1.0 if success >= 0.5 else 0.0
-                            round_state["threshold_success_history"][feature_name].append(binary)
-                            session_success_history[feature_name].append(binary)
+
                             feature_successes.append(success)
+                            feature_binaries.append(1.0 if success >= 0.5 else 0.0)
+                            valid_features_this_epoch.append(feature_name)
+
+                        # Epoch counts as a win only if every feature wins
+                        epoch_binary = 1.0 if feature_binaries and all(b == 1.0 for b in feature_binaries) else 0.0
+                        for feature_name in valid_features_this_epoch:
+                            round_state["threshold_success_history"][feature_name].append(epoch_binary)
+                            session_success_history[feature_name].append(epoch_binary)
+                        session_epoch_history.append(epoch_binary)
 
                         feedback_val = float(np.mean(feature_successes)) if feature_successes else 0.0
 
