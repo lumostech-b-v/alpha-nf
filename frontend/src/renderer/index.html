@@ -248,6 +248,12 @@
                         </button>
                     </div>
                 </div>
+                <div id="protocolDisorderFilterBar" style="display:none; align-items:center; gap:var(--spacing-sm); padding: var(--spacing-base) 0;">
+                    <label style="font-size:0.85em; font-weight:500; color:var(--text-secondary);">Disorder</label>
+                    <select id="protocolDisorderSelect" class="form-control" style="max-width:220px;" onchange="window.filterProtocolsByDisorder(this.value)">
+                        <option value="all">All disorders</option>
+                    </select>
+                </div>
                 <div class="dashboard-section">
                     <div id="protocolsListContainer">
                         <div class="empty-state-card">

@@ -20,7 +20,18 @@
       "PowerShell(Get-Process *)",
       "PowerShell($url = \"https://github.com/git-for-windows/git/releases/download/v2.47.1.windows.1/Git-2.47.1-64-bit.exe\"; $out = \"$env:TEMP\\\\git-installer.exe\"; Write-Host \"Downloading Git...\"; Invoke-WebRequest -Uri $url -OutFile $out; Write-Host \"Done\")",
       "PowerShell(Write-Host \"Installing Git...\"; Start-Process \"$env:TEMP\\\\git-installer.exe\" -ArgumentList \"/VERYSILENT /NORESTART /NOCANCEL /SP- /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS /COMPONENTS=icons,ext\\\\reg\\\\shellhere,assoc,assoc_sh\" -Wait; Write-Host \"Done\")",
-      "PowerShell(git *)"
+      "PowerShell(git *)",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget",
+      "Bash(curl -s http://localhost:8000/health)",
+      "Bash(curl -s http://localhost:8000/)",
+      "Bash(/Users/farhadfirozitabar/Documents/Clients/Alpha/neuro-feedback/pyServer/.venv/bin/uvicorn app.core.main:app --reload)",
+      "Bash(echo \"Backend PID: $!\")",
+      "Bash(sleep 4 && curl -s http://localhost:8000/ && echo \"\" && tail -20 /tmp/neuro-backend.log)",
+      "Bash(npm run *)",
+      "Bash(echo \"Frontend PID: $!\")",
+      "Bash(grep -n \"\\\\.join\\(''\\)\\\\s*}\\\\s*$\\\\|protocols\\\\.map\\\\b\\\\|filtered\\\\.map\\\\b\" /Users/farhadfirozitabar/Documents/Clients/Alpha/neuro-feedback/frontend/src/renderer/js/core/ui/ui-protocols.js)",
+      "Bash(git checkout *)"
     ]
   }
 }

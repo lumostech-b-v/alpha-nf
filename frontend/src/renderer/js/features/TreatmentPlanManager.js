@@ -6,6 +6,7 @@
 class TreatmentPlan {
     constructor() {
         this.currentPatientId = null;
+        this.currentPatientDisorder = null;
         this.planData = {
             blocks: [],
             protocols: [],
@@ -131,13 +132,21 @@ class TreatmentPlan {
     async loadPatientTreatmentPlan(patientId) {
         if (!patientId) {
             this.currentPatientId = null;
+            this.currentPatientDisorder = null;
             this.clearTreatmentPlan();
             return;
         }
 
         this.currentPatientId = patientId;
+        this.currentPatientDisorder = null;
 
         try {
+            // Load the patient's disorder so the protocol filter defaults to it.
+            try {
+                const disorderData = await window.api.getPatientLatestDisorder(patientId);
+                this.currentPatientDisorder = disorderData?.disorder || null;
+            } catch (_) { /* non-fatal */ }
+
             const treatmentPlan = await window.api.getTreatmentPlanByPatient(patientId);
             if (treatmentPlan && (treatmentPlan.blocks?.length > 0 || treatmentPlan.checkpoints?.length > 0)) {
                 this.loadTreatmentPlanData(treatmentPlan);
@@ -384,28 +393,71 @@ class TreatmentPlan {
         const protocolLibrary = document.getElementById('protocolLibrary');
         if (!protocolLibrary) return;
 
-        protocolLibrary.innerHTML = this.availableProtocols.map(protocol => {
-            // Extract bands info from new structure
-            const bands = protocol.features?.frequency_bands || [];
-            const rewardBands = bands.filter(b => b.type === 'reward');
-            const inhibitBands = bands.filter(b => b.type === 'inhibit');
-            const allChannels = [...new Set(bands.flatMap(b => b.channels || []))];
-            
-            return `
-                <div class="protocol-card" data-id="${protocol.id}" onclick="treatmentPlan.selectProtocol('${protocol.id}')">
-                    <div class="protocol-header">
-                        <span class="protocol-id">${protocol.id}</span>
+        const disorders = [...new Set(
+            this.availableProtocols
+                .map(p => this.extractProtocolDisorder(p.name))
+                .filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b));
+
+        if (this.libraryDisorderFilter === undefined) {
+            const patientDisorder = this.currentPatientDisorder || window.sessionPlanningPanel?.disorder || null;
+            const matched = patientDisorder
+                ? disorders.find(d => d.toLowerCase() === patientDisorder.toLowerCase())
+                : null;
+            this.libraryDisorderFilter = matched || 'all';
+        }
+        if (this.libraryDisorderFilter !== 'all' &&
+            !disorders.some(d => d === this.libraryDisorderFilter)) {
+            this.libraryDisorderFilter = 'all';
+        }
+
+        const activeFilter = this.libraryDisorderFilter;
+        const filtered = activeFilter === 'all'
+            ? this.availableProtocols
+            : this.availableProtocols.filter(p => this.extractProtocolDisorder(p.name) === activeFilter);
+
+        const filterHtml = disorders.length > 0 ? `
+            <div class="protocol-disorder-filter" style="display: flex; align-items: center; gap: var(--spacing-sm); margin-bottom: var(--spacing-base);">
+                <label style="font-size: 0.85em; font-weight: 500; color: var(--text-secondary);">Disorder</label>
+                <select class="form-control" style="max-width: 240px;"
+                        onchange="treatmentPlan.filterLibraryByDisorder(this.value)">
+                    <option value="all" ${activeFilter === 'all' ? 'selected' : ''}>All disorders</option>
+                    ${disorders.map(d => `
+                        <option value="${d}" ${activeFilter === d ? 'selected' : ''}>${d}</option>
+                    `).join('')}
+                </select>
+            </div>
+        ` : '';
+
+        const cardsHtml = filtered.length === 0
+            ? '<div class="empty-state-card"><p>No protocols match this filter.</p></div>'
+            : filtered.map(protocol => {
+                const bands = protocol.features?.frequency_bands || [];
+                const rewardBands = bands.filter(b => b.type === 'reward');
+                const inhibitBands = bands.filter(b => b.type === 'inhibit');
+                const allChannels = [...new Set(bands.flatMap(b => b.channels || []))];
+                return `
+                    <div class="protocol-card" data-id="${protocol.id}" onclick="treatmentPlan.selectProtocol('${protocol.id}')">
+                        <div class="protocol-header">
+                            <span class="protocol-id">${protocol.id}</span>
+                        </div>
+                        <h4 class="protocol-title">${protocol.name}</h4>
+                        <div class="protocol-details">
+                            <p><strong>Channels:</strong> ${allChannels.join(', ') || 'N/A'}</p>
+                            ${rewardBands.length > 0 ? `<p><strong>Reward:</strong> ${rewardBands.map(b => `${b.frequency_range[0]}-${b.frequency_range[1]}Hz`).join(', ')}</p>` : ''}
+                            ${inhibitBands.length > 0 ? `<p><strong>Inhibit:</strong> ${inhibitBands.map(b => `${b.frequency_range[0]}-${b.frequency_range[1]}Hz`).join(', ')}</p>` : ''}
+                            ${protocol.note ? `<p class="text-secondary">${protocol.note.substring(0, 100)}${protocol.note.length > 100 ? '...' : ''}</p>` : ''}
+                        </div>
                     </div>
-                    <h4 class="protocol-title">${protocol.name}</h4>
-                    <div class="protocol-details">
-                        <p><strong>Channels:</strong> ${allChannels.join(', ') || 'N/A'}</p>
-                        ${rewardBands.length > 0 ? `<p><strong>Reward:</strong> ${rewardBands.map(b => `${b.frequency_range[0]}-${b.frequency_range[1]}Hz`).join(', ')}</p>` : ''}
-                        ${inhibitBands.length > 0 ? `<p><strong>Inhibit:</strong> ${inhibitBands.map(b => `${b.frequency_range[0]}-${b.frequency_range[1]}Hz`).join(', ')}</p>` : ''}
-                        ${protocol.note ? `<p class="text-secondary">${protocol.note.substring(0, 100)}${protocol.note.length > 100 ? '...' : ''}</p>` : ''}
-                    </div>
-                </div>
-            `;
-        }).join('');
+                `;
+            }).join('');
+
+        protocolLibrary.innerHTML = filterHtml + cardsHtml;
+    }
+
+    filterLibraryByDisorder(disorder) {
+        this.libraryDisorderFilter = disorder || 'all';
+        this.renderAvailableProtocols();
     }
 
     selectProtocol(protocolId) {
@@ -497,7 +549,7 @@ class TreatmentPlan {
         // Default the filter to the patient's current disorder when it matches one
         // of the available disorders; otherwise keep whatever the user last picked.
         if (this.protocolDisorderFilter === undefined) {
-            const patientDisorder = window.sessionPlanningPanel?.disorder || null;
+            const patientDisorder = this.currentPatientDisorder || window.sessionPlanningPanel?.disorder || null;
             const matched = patientDisorder
                 ? disorders.find(d => d.toLowerCase() === patientDisorder.toLowerCase())
                 : null;

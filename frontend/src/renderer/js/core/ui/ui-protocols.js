@@ -5,6 +5,39 @@
     'use strict';
 
     let protocols = [];
+    let disorderFilter = 'all';
+
+    function extractProtocolDisorder(name) {
+        if (!name) return null;
+        const matches = name.match(/\(([^()]+)\)/g);
+        if (!matches || matches.length === 0) return null;
+        return matches[matches.length - 1].slice(1, -1).trim();
+    }
+
+    function updateDisorderFilterBar() {
+        const bar = document.getElementById('protocolDisorderFilterBar');
+        const select = document.getElementById('protocolDisorderSelect');
+        if (!bar || !select) return;
+
+        const disorders = [...new Set(
+            protocols.map(p => extractProtocolDisorder(p.name)).filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b));
+
+        if (disorders.length === 0) {
+            bar.style.display = 'none';
+            return;
+        }
+
+        select.innerHTML = `<option value="all" ${disorderFilter === 'all' ? 'selected' : ''}>All disorders</option>` +
+            disorders.map(d => `<option value="${d}" ${disorderFilter === d ? 'selected' : ''}>${d}</option>`).join('');
+
+        bar.style.display = 'flex';
+    }
+
+    window.filterProtocolsByDisorder = function(disorder) {
+        disorderFilter = disorder || 'all';
+        renderProtocolsList();
+    };
     
     // Shared constants
     const PREDEFINED_BANDS = [
@@ -73,9 +106,17 @@
             return;
         }
 
+        updateDisorderFilterBar();
+
+        const filtered = disorderFilter === 'all'
+            ? protocols
+            : protocols.filter(p => extractProtocolDisorder(p.name) === disorderFilter);
+
         container.innerHTML = `
             <div class="protocols-grid" id="protocolsGrid">
-                ${protocols.map(protocol => {
+                ${filtered.length === 0
+                    ? '<p style="color:var(--text-secondary);grid-column:1/-1;">No protocols match this filter.</p>'
+                    : filtered.map(protocol => {
                     const frequencyBands = protocol.features?.frequency_bands || [];
                     const rewardBands = frequencyBands.filter(b => b.type === 'reward');
                     const inhibitBands = frequencyBands.filter(b => b.type === 'inhibit');
