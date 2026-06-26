@@ -277,7 +277,7 @@ async def nfcore(websocket: WebSocket) -> None:
                     "feature_thresholds": {},
                     "smoothed_thresholds": {},  # Smoothed thresholds for display
                     "baseline_locked": False,
-                    "threshold_success_history": defaultdict(lambda: deque(maxlen=300))
+                    "threshold_success_history": defaultdict(lambda: deque(maxlen=60))
                 }
 
             round_state = build_round_state()
