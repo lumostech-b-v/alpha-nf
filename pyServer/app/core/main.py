@@ -111,7 +111,7 @@ def create_app() -> FastAPI:
         # Shutdown events
         logger.info("API shutdown")
 
-    app = FastAPI(title="NeuroFeedback API", version="2.0.1", lifespan=lifespan)
+    app = FastAPI(title="NeuroFeedback API", version="2.0.2", lifespan=lifespan)
     
     # CORS configuration
     cors_origins = os.getenv("CORS_ORIGINS", "*")

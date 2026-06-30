@@ -6,7 +6,8 @@ class ChartsManager {
     constructor() {
         this.charts = {};
         this.featureCharts = {};
-        this.featureAxisMax = {}; // Stable, smoothed y-axis max per band
+        this.featureAxisMax = {}; // Stable y-axis max per band, locked after baseline
+        this.isBaselinePhase = true; // Set by WebSocketManager; stays true until training starts
         this.defaultColors = {
             primary: '#000000',
             secondary: '#666666',
@@ -665,51 +666,53 @@ class ChartsManager {
         });
     }
 
-    // Round a value up to a clean axis bound (1, 2, 2.5, 5, 10 × 10^n)
-    // so ticks stay tidy and the axis doesn't flicker between odd numbers.
+    // Round a value up to the nearest clean axis bound.
+    // Finer steps (1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10 × 10^n) prevent
+    // values like 50.57 from jumping all the way to 100.
     _niceMax(v) {
         if (!Number.isFinite(v) || v <= 0) return 1;
         const pow = Math.pow(10, Math.floor(Math.log10(v)));
         const n = v / pow;
         let nice;
-        if (n <= 1) nice = 1;
-        else if (n <= 2) nice = 2;
+        if (n <= 1)        nice = 1;
+        else if (n <= 1.5) nice = 1.5;
+        else if (n <= 2)   nice = 2;
         else if (n <= 2.5) nice = 2.5;
-        else if (n <= 5) nice = 5;
-        else nice = 10;
+        else if (n <= 3)   nice = 3;
+        else if (n <= 4)   nice = 4;
+        else if (n <= 5)   nice = 5;
+        else if (n <= 6)   nice = 6;
+        else if (n <= 8)   nice = 8;
+        else               nice = 10;
         return nice * pow;
     }
 
-    // Compute a stable y-axis maximum for a band: fast attack (jump up on spikes),
-    // slow release (decay gently), with hysteresis on the displayed "nice" bound so
-    // the axis holds steady across frames instead of rescaling on every sample.
+    // Fixed scale: lock after baseline using the higher of (threshold / 0.7) and (peak value seen / 0.8).
+    // This keeps the threshold line at a fixed position while ensuring the bars actually
+    // fill a meaningful portion of the chart even when threshold >> typical signal.
+    // During baseline we track the running peak but don't lock yet.
     _stableAxisMax(featureName, value, threshold) {
-        const v = Number.isFinite(value) ? Math.max(value, 0) : 0;
-        const t = (threshold !== undefined && threshold !== null && Number.isFinite(threshold))
-            ? Math.max(threshold, 0)
-            : 0;
+        const t = (threshold !== undefined && threshold !== null && Number.isFinite(threshold) && threshold > 0)
+            ? threshold
+            : null;
 
-        // Keep the bar peak near ~80% of the axis and the threshold near ~70%,
-        // so neither pins to the top edge. Floor avoids a collapsed axis at rest.
-        const desired = Math.max(v / 0.8, t / 0.7, 1);
+        let state = this.featureAxisMax[featureName] || { nice: 10, locked: false, peak: 0 };
 
-        let state = this.featureAxisMax[featureName];
-        if (!state) {
-            state = { smooth: desired, nice: this._niceMax(desired) };
-        } else if (desired > state.smooth) {
-            state.smooth = desired;              // fast attack
+        if (state.locked) return state.nice;
+
+        // Track the largest value seen so far across all frames (including baseline)
+        const peak = Math.max(state.peak || 0, Number.isFinite(value) ? value : 0);
+
+        if (!this.isBaselinePhase && t !== null) {
+            // Baseline just ended — lock now.
+            // Use whichever bound is larger: threshold at 70% height, or peak at 80% height.
+            const fromThreshold = t / 0.7;
+            const fromPeak     = peak > 0 ? peak / 0.8 : 0;
+            const nice = this._niceMax(Math.max(fromThreshold, fromPeak));
+            state = { nice, locked: true, peak };
         } else {
-            state.smooth += (desired - state.smooth) * 0.05;  // slow release
-        }
-
-        // Only re-snap the visible bound when the signal exceeds it or falls well
-        // below it (hysteresis), preventing constant tick re-labelling.
-        if (state.smooth > state.nice || state.smooth < state.nice * 0.55) {
-            state.nice = this._niceMax(state.smooth);
-        }
-        // Always keep the threshold line comfortably on-screen.
-        if (t > 0) {
-            state.nice = Math.max(state.nice, this._niceMax(t / 0.7));
+            // Still in baseline: keep updating peak but don't lock
+            state = { nice: state.nice, locked: false, peak };
         }
 
         this.featureAxisMax[featureName] = state;
@@ -757,6 +760,7 @@ class ChartsManager {
             this.featureCharts = {};
         }
         this.featureAxisMax = {};
+        this.isBaselinePhase = true; // reset so new session starts unlocked
     }
 
     resizeCharts() {

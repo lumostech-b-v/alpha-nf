@@ -31,7 +31,17 @@
       "Bash(npm run *)",
       "Bash(echo \"Frontend PID: $!\")",
       "Bash(grep -n \"\\\\.join\\(''\\)\\\\s*}\\\\s*$\\\\|protocols\\\\.map\\\\b\\\\|filtered\\\\.map\\\\b\" /Users/farhadfirozitabar/Documents/Clients/Alpha/neuro-feedback/frontend/src/renderer/js/core/ui/ui-protocols.js)",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(git remote *)",
+      "Bash(git push *)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('bands', d.get\\('default_parameters', {}\\).get\\('bands', {}\\)\\), indent=2\\)\\)\")",
+      "Bash(python3 -c \"import json; d=json.load\\(open\\('/Users/farhadfirozitabar/Documents/Clients/Alpha/neuro-feedback/protocols/adhd.json'\\)\\); print\\(json.dumps\\(d[0] if isinstance\\(d, list\\) else d, indent=2\\)\\)\")",
+      "Bash(tmux send-keys *)",
+      "Bash(tmux capture-pane *)",
+      "Bash(python -c \"import ast; ast.parse\\(open\\('signal_processing/sp_routes.py'\\).read\\(\\)\\); print\\('sp_routes.py OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('signal_processing/sp_routes.py'\\).read\\(\\)\\); print\\('sp_routes.py OK'\\)\")",
+      "Bash(node --check ../frontend/src/renderer/js/core/WebSocketManager.js)",
+      "Bash(pkill -f \"uvicorn app.core.main\")"
     ]
   }
 }

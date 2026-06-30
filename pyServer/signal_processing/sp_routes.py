@@ -2,7 +2,7 @@ import time
 import numpy as np
 import logging
 import asyncio
-from collections import defaultdict, deque
+from collections import deque
 from datetime import datetime, timezone
 from weakref import WeakSet
 
@@ -277,13 +277,11 @@ async def nfcore(websocket: WebSocket) -> None:
                     "feature_thresholds": {},
                     "smoothed_thresholds": {},  # Smoothed thresholds for display
                     "baseline_locked": False,
-                    "threshold_success_history": defaultdict(lambda: deque(maxlen=60))
                 }
 
             round_state = build_round_state()
 
-            # Session-level success accumulators (survive round resets)
-            session_success_history: dict[str, list[float]] = defaultdict(list)
+            # Session-level success accumulator (survives round resets)
             session_epoch_history: list[float] = []  # one entry per epoch: 1 if all features won, else 0
 
             # Flag to track if we're waiting for resume command
@@ -634,7 +632,6 @@ async def nfcore(websocket: WebSocket) -> None:
                     else:
                         feature_successes = []
                         feature_binaries = []
-                        valid_features_this_epoch = []
                         for feature_name in selected_features:
                             threshold = round_state["feature_thresholds"].get(feature_name)
                             value = feature_values.get(feature_name)
@@ -663,13 +660,9 @@ async def nfcore(websocket: WebSocket) -> None:
 
                             feature_successes.append(success)
                             feature_binaries.append(1.0 if success >= 0.5 else 0.0)
-                            valid_features_this_epoch.append(feature_name)
 
                         # Epoch counts as a win only if every feature wins
                         epoch_binary = 1.0 if feature_binaries and all(b == 1.0 for b in feature_binaries) else 0.0
-                        for feature_name in valid_features_this_epoch:
-                            round_state["threshold_success_history"][feature_name].append(epoch_binary)
-                            session_success_history[feature_name].append(epoch_binary)
                         session_epoch_history.append(epoch_binary)
 
                         feedback_val = float(np.mean(feature_successes)) if feature_successes else 0.0
@@ -699,20 +692,15 @@ async def nfcore(websocket: WebSocket) -> None:
                         except Exception as e:
                             logger.error("Failed to send session update: %s", e)
 
+                        # Only current_threshold is consumed by the frontend (chart threshold
+                        # line fallback); the former rolling success_rate/stats were dead.
                         threshold_stats = {}
                         for feature_name in selected_features:
                             threshold = round_state["feature_thresholds"].get(feature_name)
                             if threshold is None:
                                 continue
-                            history = list(round_state["threshold_success_history"][feature_name])
-                            buf = round_state["baseline_buffers"][feature_name]
                             threshold_stats[feature_name] = {
                                 "current_threshold": float(threshold),
-                                "success_rate": float(np.mean(history)) if history else 0.0,
-                                "samples_count": len(history),
-                                "target_success_rate": 1.0,
-                                "recent_values_mean": float(np.mean(buf)) if len(buf) > 0 else float(threshold),
-                                "recent_values_std": float(np.std(buf)) if len(buf) > 1 else 0.0
                             }
 
                     # Only send feedback every 1 second (throttle feedback updates)

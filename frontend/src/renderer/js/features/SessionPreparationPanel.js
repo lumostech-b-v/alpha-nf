@@ -511,13 +511,20 @@ class SessionPreparationPanel {
       this.sessionSettings.channels = channels;
     }
 
-    // If the protocol has no reward bands (reward: "-"), lock reward threshold to 0
     const protocol = this.currentSessionInfo.protocol;
-    const noRewardBand = !protocol ||
-      !(protocol.features?.frequency_bands || []).some(b => b.type === 'reward');
-    if (noRewardBand) {
-      this.sessionSettings.reward_threshold_percentage = 0;
-    }
+    const bands = protocol?.features?.frequency_bands || [];
+
+    // A band counts as "reward" if type === 'reward', or a ratio band with mode 'enhance'
+    const noRewardBand = !protocol || !bands.some(b =>
+      b.type === 'reward' || (b.type === 'ratio' && (!b.mode || b.mode === 'enhance'))
+    );
+    // A band counts as "inhibit" if type === 'inhibit', or a ratio band with mode 'inhibit'
+    const noInhibitBand = !protocol || !bands.some(b =>
+      b.type === 'inhibit' || (b.type === 'ratio' && b.mode === 'inhibit')
+    );
+
+    if (noRewardBand)  this.sessionSettings.reward_threshold_percentage  = 0;
+    if (noInhibitBand) this.sessionSettings.inhibit_threshold_percentage = 0;
 
     const channelsHTML = channels.length > 0 ? `
       <div class="form-group">
@@ -594,8 +601,8 @@ class SessionPreparationPanel {
             </div>
           </div>
           <div class="form-group">
-            <label for="inhibitThresholdInput">Inhibit threshold</label>
-            <div class="number-field">
+            <label for="inhibitThresholdInput">Inhibit threshold${noInhibitBand ? ' <span style="font-size:0.8em;color:var(--text-secondary);font-weight:normal;">(no inhibit band)</span>' : ''}</label>
+            <div class="number-field" ${noInhibitBand ? 'style="opacity:0.5;pointer-events:none;"' : ''}>
               <input
                 type="number"
                 id="inhibitThresholdInput"
@@ -604,10 +611,11 @@ class SessionPreparationPanel {
                 min="0"
                 max="100"
                 value="${this.sessionSettings.inhibit_threshold_percentage.toFixed(0)}"
+                ${noInhibitBand ? 'disabled' : ''}
               >
               <div class="number-steppers">
-                <button type="button" id="inhibitThresholdUp" class="num-step" aria-label="Increase"><span data-lucide="chevron-up"></span></button>
-                <button type="button" id="inhibitThresholdDown" class="num-step" aria-label="Decrease"><span data-lucide="chevron-down"></span></button>
+                <button type="button" id="inhibitThresholdUp" class="num-step" aria-label="Increase" ${noInhibitBand ? 'disabled' : ''}><span data-lucide="chevron-up"></span></button>
+                <button type="button" id="inhibitThresholdDown" class="num-step" aria-label="Decrease" ${noInhibitBand ? 'disabled' : ''}><span data-lucide="chevron-down"></span></button>
               </div>
               <span class="number-unit">%</span>
             </div>

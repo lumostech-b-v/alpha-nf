@@ -961,9 +961,9 @@ class SessionPlanningPanel {
       this.persistedBlockIds = new Set(this.planData.blocks.filter(block => block.id).map(block => block.id));
       this.persistedCheckpointIds = new Set(this.planData.checkpoints.filter(cp => cp.id).map(cp => cp.id));
       this.renderTimeline();
-      this.renderBlocks();
       this.renderCheckpoints();
-      await this.loadCurrentSessionInfo();
+      await this.loadCurrentSessionInfo(); // sets currentSessionInfo.sessionNumber before blocks render
+      this.renderBlocks(); // must come after loadCurrentSessionInfo so Done status is correct
     } catch (error) {
       console.error("Error loading treatment plan:", error);
       if (!this.planData) {
@@ -1100,25 +1100,31 @@ class SessionPlanningPanel {
       return;
     }
 
+    const currentSession = this.currentSessionInfo?.sessionNumber || 1;
+
     tbody.innerHTML = this.planData.blocks.map((block, index) => {
       const protocol = this.availableProtocols.find(p => p.id === block.protocolId);
-      const protocolDisplay = block.protocolId 
+      const protocolDisplay = block.protocolId
         ? (protocol?.name || `Protocol ID: ${block.protocolId}`)
         : "Not assigned";
-      
+      const isDone = block.endSession != null && block.endSession < currentSession;
+
       return `
-        <tr>
+        <tr${isDone ? ' class="row-done"' : ''}>
           <td>${block.name || `Block ${index + 1}`}</td>
           <td>${block.startSession || ""}-${block.endSession || ""}</td>
           <td>${protocolDisplay}</td>
           <td>${block.target || "N/A"}</td>
           <td>
-            <button class="action-btn" onclick="window.sessionPlanningPanel.editBlock(${index})" title="Edit">
+            ${isDone
+              ? '<span class="done-badge">Done</span>'
+              : `<button class="action-btn" onclick="window.sessionPlanningPanel.editBlock(${index})" title="Edit">
               <span data-lucide="edit"></span>
             </button>
             <button class="action-btn delete" onclick="window.sessionPlanningPanel.deleteBlock(${index})" title="Delete">
               <span data-lucide="trash-2"></span>
-            </button>
+            </button>`
+            }
           </td>
         </tr>
       `;
@@ -1149,7 +1155,7 @@ class SessionPlanningPanel {
     }
   }
 
-  syncFromTreatmentPlan() {
+  async syncFromTreatmentPlan() {
     if (!window.treatmentPlan?.planData) return;
 
     const existingBlocks = [...(this.planData.blocks || [])];
@@ -1177,9 +1183,9 @@ class SessionPlanningPanel {
     });
 
     this.renderTimeline();
-    this.renderBlocks();
     this.renderCheckpoints();
-    this.loadCurrentSessionInfo();
+    await this.loadCurrentSessionInfo(); // must resolve before blocks render so Done flags are correct
+    this.renderBlocks();
   }
 
   // ====================================
@@ -1245,8 +1251,13 @@ class SessionPlanningPanel {
       
       const modal = document.getElementById('blockModal');
       if (modal) {
+        const cleanup = () => {
+          clearInterval(interval);
+          observer.disconnect();
+        };
         const checkModal = () => {
           if (!modal.classList.contains('active')) {
+            cleanup();
             setTimeout(() => this.syncFromTreatmentPlan(), 100);
             if (window.treatmentPlan && originalSaveBlock) {
               window.treatmentPlan.saveBlock = originalSaveBlock;
@@ -1256,10 +1267,6 @@ class SessionPlanningPanel {
         const interval = setInterval(checkModal, 200);
         const observer = new MutationObserver(checkModal);
         observer.observe(modal, { attributes: true, attributeFilter: ['class'] });
-        modal.addEventListener('transitionend', () => {
-          clearInterval(interval);
-          observer.disconnect();
-        }, { once: true });
       }
     } else {
       const name = prompt("Block name:", blockData?.name || "");
@@ -1446,20 +1453,26 @@ class SessionPlanningPanel {
 
     const sortedCheckpoints = [...this.planData.checkpoints].sort((a, b) => a.session - b.session);
 
+    const currentSession = this.currentSessionInfo?.sessionNumber || 1;
+
     tbody.innerHTML = sortedCheckpoints.map(checkpoint => {
       const originalIndex = this.planData.checkpoints.indexOf(checkpoint);
+      const isDone = checkpoint.session != null && checkpoint.session < currentSession;
       return `
-        <tr>
+        <tr${isDone ? ' class="row-done"' : ''}>
           <td>${checkpoint.session}</td>
           <td>${checkpoint.type}</td>
           <td>${checkpoint.description}</td>
           <td>
-            <button class="action-btn" onclick="window.sessionPlanningPanel.editCheckpoint(${originalIndex})" title="Edit">
+            ${isDone
+              ? '<span class="done-badge">Done</span>'
+              : `<button class="action-btn" onclick="window.sessionPlanningPanel.editCheckpoint(${originalIndex})" title="Edit">
               <span data-lucide="edit"></span>
             </button>
             <button class="action-btn delete" onclick="window.sessionPlanningPanel.deleteCheckpoint(${originalIndex})" title="Delete">
               <span data-lucide="trash-2"></span>
-            </button>
+            </button>`
+            }
           </td>
         </tr>
       `;

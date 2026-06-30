@@ -154,22 +154,22 @@ class SessionRecordingPanel {
               <h3>EEG Signal</h3>
               <div class="nf-channel-indicators">
                 <span class="nf-channel-badge ch1" id="channel1Status">CH1</span>
-                <span class="nf-channel-badge ch2" id="channel2Status">CH2</span>
-                <span class="nf-channel-badge ch3" id="channel3Status">CH3</span>
+                <span class="nf-channel-badge ch2" id="channel2Status" style="display:none">CH2</span>
+                <span class="nf-channel-badge ch3" id="channel3Status" style="display:none">CH3</span>
               </div>
             </div>
-            <div class="nf-eeg-grid">
+            <div class="nf-eeg-grid" style="grid-template-columns: repeat(1, 1fr)">
               <div class="nf-eeg-channel">
                 <div class="nf-eeg-plot" id="plotChannel1">
                   <div class="nf-eeg-label">CH1</div>
                 </div>
               </div>
-              <div class="nf-eeg-channel">
+              <div class="nf-eeg-channel" style="display:none">
                 <div class="nf-eeg-plot" id="plotChannel2">
                   <div class="nf-eeg-label">CH2</div>
                 </div>
               </div>
-              <div class="nf-eeg-channel">
+              <div class="nf-eeg-channel" style="display:none">
                 <div class="nf-eeg-plot" id="plotChannel3">
                   <div class="nf-eeg-label">CH3</div>
                 </div>
@@ -201,6 +201,8 @@ class SessionRecordingPanel {
       panel = document.getElementById("sessionRecordingPanel");
       if (typeof lucide !== "undefined" && lucide.createIcons) lucide.createIcons();
       this.initializeEventListeners();
+      // Fresh DOM — reset so setActiveChannelCount doesn't skip on its first call
+      this._activeChannelCount = undefined;
     } else {
       // Panel already exists, make sure it's visible
       panel.style.display = "block";

@@ -511,6 +511,11 @@ class WebSocketManager {
             window.charts.updateSessionTimer(data.session_time);
         }
         
+        // Tell charts whether we're still in baseline so it doesn't lock the scale too early
+        if (window.charts) {
+            window.charts.isBaselinePhase = isBaseline;
+        }
+
         // Update feature amplitude charts with thresholds and band info
         if (window.charts && data.individual_features) {
             // Extract threshold values from feature_thresholds if available
@@ -634,6 +639,8 @@ class WebSocketManager {
 
     handleArtifact(data) {
         console.log('[WebSocketManager] Artifact detected:', data.artifact_type, data.message);
+        // ARTIFACT_DISPLAY_DISABLED: detections are inaccurate; re-enable by removing this early return
+        return;
         if (window.uiState?.sessionRecordingPanel) {
             window.uiState.sessionRecordingPanel.showArtifactAlert(data.message, data.artifact_type);
         }
@@ -888,43 +895,8 @@ class WebSocketManager {
         return this.latestFeedbackData || null;
     }
     
-    getCurrentSuccessRates() {
-        if (!this.latestFeedbackData || !this.latestFeedbackData.threshold_stats) {
-            return {};
-        }
-        
-        const successRates = {};
-        Object.keys(this.latestFeedbackData.threshold_stats).forEach(feature => {
-            const stats = this.latestFeedbackData.threshold_stats[feature];
-            successRates[feature] = {
-                current: stats.success_rate,
-                target: stats.target_success_rate,
-                threshold: stats.current_threshold,
-                samples: stats.samples_count
-            };
-        });
-        
-        return successRates;
-    }
-    
     getCurrentFeedbackScore() {
         return this.latestFeedbackData ? this.latestFeedbackData.feedback : null;
-    }
-    
-    getSessionPerformanceSummary() {
-        if (!this.latestFeedbackData) {
-            return null;
-        }
-        
-        const data = this.latestFeedbackData;
-        return {
-            currentScore: data.feedback,
-            combinedValue: data.combined_value,
-            sessionTime: data.session_time,
-            successRates: this.getCurrentSuccessRates(),
-            individualFeatures: data.individual_features || {},
-            baselineStatus: data.baseline_overall || {}
-        };
     }
 }
 
