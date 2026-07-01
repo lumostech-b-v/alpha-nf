@@ -1,9 +1,12 @@
 # NeuroFeedback — Backend Master Document
 
-> A complete, A-to-Z technical reference for the `pyServer/` FastAPI backend: architecture,
-> the real-time EEG signal-processing pipeline, every calculation it performs, the data model,
-> the protocol engine, and the known sharp edges. Written against the code as of branch `dev`
-> (API version 2.0.1).
+> A complete, A-to-Z technical reference for the `pyServer/` FastAPI backend, scoped to **only the
+> code the running application actually loads and uses**: architecture, the real-time EEG
+> signal-processing pipeline, every calculation it performs, the data model, the protocol engine,
+> and the live-path sharp edges. Written against the code as of branch `dev` (API version 2.0.1).
+>
+> Standalone demo scripts, dormant classes, and tooling that the shipped app never imports are
+> **excluded** — see the appendix for the explicit not-in-app list so nobody re-documents them.
 
 ---
 
@@ -12,7 +15,7 @@
 The backend is a **FastAPI app on `localhost:8000`** that:
 
 1. Serves CRUD REST APIs for **users, patients, protocols, treatment plans, and sessions** (SQLite via SQLAlchemy).
-2. Owns the **EEG device I/O** (real serial I8 hardware, or a simulator/mock fallback).
+2. Owns the **EEG device I/O** (real serial I8 hardware, or a simulator fallback) inside the WebSocket loop.
 3. Runs the **real-time neurofeedback DSP loop** over a single WebSocket (`/sp/nfcore_start`):
    acquire → filter → extract band features → collect baseline → derive thresholds →
    score success → stream feedback to the renderer ~1×/sec.
@@ -35,26 +38,44 @@ live values. Persistence of the finished session (success rate, thresholds, CSV)
         │                                                 │  WebSocket router: /sp/*              │
 ┌────────────────────────────┐                            │                                       │
 │ Electron main process      │                            │  signal_processing/  (DSP pipeline)   │
-│  frontend/src/main.js      │                            │  device_handlers/    (real/mock I/O)  │
-│  - kills orphan backends   │                            │     └── SQLite app.db (SQLAlchemy)    │
-│  - frees port 8000         │                            └─────────────────────────────────────┘
+│  frontend/src/main.js      │                            │       └── SQLite app.db (SQLAlchemy)  │
+│  - kills orphan backends   │                            └─────────────────────────────────────┘
+│  - frees port 8000         │
 │  - spawns main.exe         │
 └────────────────────────────┘
 ```
 
 - **Dev:** you run `uvicorn app.core.main:app --reload` yourself; `npm run dev` does **not** start the backend.
 - **Prod:** the backend is a PyInstaller **onefile** binary (`pyServer/dist/main.exe`) that Electron spawns from `resources/backend/main.exe`. `main.py::create_app()` is the entry composed object.
-- **App composition** (`app/core/main.py:71`): one router included per domain package + the `/sp` signal-processing router. On startup the lifespan handler runs `Base.metadata.create_all`, then the hand-rolled migrations, then `sync_all_default_protocols`.
+- **App composition** (`app/core/main.py`): one router included per domain package + the `/sp` signal-processing router. On startup the lifespan handler runs `Base.metadata.create_all`, then the hand-rolled migrations, then `sync_all_default_protocols`.
 
-### Module size map (where the weight is)
+### The live import graph (what `create_app()` actually pulls in)
+```
+app/core/main.py
+ ├─ app/users      (models, schemas, crud, routes)
+ ├─ app/patients   (models, schemas, crud, routes)
+ ├─ app/sessions   (models, schemas, crud, routes)
+ ├─ app/protocols  (models, schemas, crud, routes, utils)
+ ├─ app/planning   (models, schemas, crud, routes)
+ ├─ app/core       (database, auth, migrations, schemas)
+ └─ signal_processing/sp_routes.py   ← the WebSocket DSP loop, which imports:
+        ├─ device_acquisition.py   (DeviceAcquisition, find_serial_port)
+        ├─ acquisition.py          (SimulatedAcquisition fallback)
+        ├─ config.py               (cfg)
+        ├─ preprocessing.py        (PlotterAlignedFilterChain — only)
+        ├─ features.py             (compute_features)
+        ├─ feedback.py             (sigmoid_map, linear_map — only)
+        └─ artifact.py             (amplitude_threshold_epochs, eye_blink_detection, emg_detection)
+```
+
+### Module size map (where the live weight is)
 | Area | File | ~Lines |
 |---|---|---|
-| WebSocket DSP monolith | `signal_processing/sp_routes.py` | **969** |
+| WebSocket DSP monolith | `signal_processing/sp_routes.py` | **957** |
 | Hand-rolled migrations | `app/core/migrations.py` | 994 |
 | Protocol CRUD + defaults | `app/protocols/crud.py` | 695 |
-| Mock device | `device_handlers/mock_device.py` | 586 |
 | Planning CRUD | `app/planning/crud.py` | 410 |
-| Device acquisition (serial) | `signal_processing/device_acquisition.py` | 256 |
+| Device acquisition (serial) | `signal_processing/device_acquisition.py` | 257 |
 
 ---
 
@@ -77,17 +98,13 @@ The DSP stages are composable modules, wired together inside the WebSocket handl
 |---|---|---|
 | `epoch_seconds` | `1.0` | Processing window length |
 | `overlap` | `0.0` | No overlap — a fresh 1 s window each step |
-| `epoch_samples` | `int(1.0 * fs)` = 256 (sim) / 250 (device) | Samples per epoch |
+| `epoch_samples` | `int(1.0 * fs)` = **250** (fs from config.json, sim + device) | Samples per epoch |
 | `step_samples` | `epoch_samples` | Samples read per loop iteration |
 | `feedback_interval` | `1.0 s` (tunable 0.1–10 via `update_feedback_interval`) | Feedback push cadence |
 | `eeg_update_interval` | `0.1 s` (10 Hz) | EEG waveform push cadence |
 | `message_check_interval` | `0.5 s` | Non-blocking inbound command poll |
 | `baseline_collection_duration` | `30.0 s` (fixed, all rounds) | Baseline window before thresholds lock |
 | `round_duration` | `total_session_duration / session_rounds` | Per-round length |
-
-> ⚠️ **Dead constant:** `sp_routes.py:94` sets `round_duration = 30.0` with a "TEMPORARY TESTING"
-> comment, but `:261` immediately overwrites it with `total_session_duration / session_rounds`.
-> The 30 s testing value has **no effect** — the real round length is total/rounds.
 
 ### 2.2 Acquisition
 
@@ -97,22 +114,25 @@ The DSP stages are composable modules, wired together inside the WebSocket handl
 - `read_samples(n)` pops `n` rows; **channel count is hard-fixed to 3** (the serial protocol). If a caller requests more channels, channels are **cycled/repeated** to fill (`out[i, ch] = out[i, ch % 3]`).
 
 **Simulator fallback** — `signal_processing/acquisition.py::SimulatedAcquisition`
-- Used whenever the real device fails or sends no data within 2 s (`sp_routes.py:206-235`).
+- Imported inline and used whenever the real device fails or sends no data within 2 s (`sp_routes.py:231-233`, constructed as `SimulatedAcquisition(fs=cfg.fs, channels=3)`).
 - Synthesises EEG as a sum of sinusoids (per channel, µV amplitudes):
   - alpha 10 Hz @ 50 µV, beta 20 Hz @ 20 µV, theta 6 Hz @ 30 µV, drift 1 Hz @ 10 µV, Gaussian noise @ 5 µV.
 - **Real-time pacing:** sleeps `num_samples/fs` of wall-clock per read so the loop runs at true device speed (otherwise it free-runs and artifact injection collapses).
 - **Deterministic artifact injection** on an 18 s cycle for UI testing: eye-blink (t=3 s, derivative-of-Gaussian ~90 µV ptp), high-amplitude spike (t=9 s, ~260 µV), EMG burst (t=15 s, 70 Hz). Amplitudes are tuned against the detector thresholds.
 
-> ⚠️ **fs inconsistency:** `cfg.fs = 256` (`signal_processing/config.py`), but the hardware and
-> `config.json` use **250 Hz**. `DeviceAcquisition` is constructed with `fs=cfg.fs` (256), so its
-> `self.fs` becomes 256 even though the I8 streams at 250. Welch frequency bins are computed with the
-> reported `fs`, so on real hardware band edges are scaled by 256/250 ≈ **+2.4%** (e.g. a "12 Hz"
-> bin is really ~11.7 Hz). Harmless for the simulator (self-consistent at 256); a real bug on device.
+> ✅ **fs now sourced from config.json (fixed 2026-07-01):** `cfg.fs` previously hardcoded **256**
+> while the I8 hardware and `config.json` stream **250 Hz**. Because `DeviceAcquisition`, the filter
+> chain, and Welch are all built from `cfg.fs`, real-device band edges and filter cutoffs were
+> scaled by 256/250 ≈ **+2.4%** (a "12 Hz" bin was really ~11.7 Hz; the 50 Hz notch landed at
+> ~48.8 Hz, leaving true mains hum partly un-notched). The simulator hid it by being self-consistent
+> at 256. Now `signal_processing/config.py::_device_sampling_rate()` reads
+> `collector.sampling_rate` from `config.json` (250, fallback 250), so hardware and DSP agree.
+> See §11 changelog.
 
 ### 2.3 Preprocessing — `PlotterAlignedFilterChain` (`preprocessing.py:88`)
 
-The live path deliberately mirrors `realtime_plotter_mac.py` for visual parity — **no common-average
-reference (CAR)** is applied in the live loop. Three zero-phase (`filtfilt`) Butterworth stages:
+The live path applies **only** `PlotterAlignedFilterChain` — **no common-average reference (CAR)**
+in the live loop. Three zero-phase (`filtfilt`) Butterworth stages:
 
 | Stage | Design | Cutoff |
 |---|---|---|
@@ -121,13 +141,11 @@ reference (CAR)** is applied in the live loop. Three zero-phase (`filtfilt`) But
 | Notch (band-stop) | `butter(4, [49, 51], 'bandstop')` | 50 Hz ±1 (mains) |
 
 - Applied with `filtfilt` (zero phase, non-causal) on each 1 s buffer. Skipped if `< min_length` (50) samples.
-- The module *also* contains a `RealTimeFilter` (stateful `sosfilt`, causal) and offline helpers
-  (`common_average_reference`, `laplacian_reference`, `design_bandpass`, `preprocessing_pipeline`)
-  — **but the live loop uses only `PlotterAlignedFilterChain`.** The others are available/legacy.
 
 > Note: `config.py` advertises `bandpass=(0.5, 20.0)` and `notch=50`, but the live chain actually
 > low-passes at **40 Hz** (hard-coded in `PlotterAlignedFilterChain`), not 20. The 40 Hz LP is what
-> lets the EMG detector see >40 Hz content on the *raw* signal.
+> lets the EMG detector see >40 Hz content on the *raw* signal. The 50 Hz notch is EU-mains-locked
+> (US 60 Hz would need a code change).
 
 ### 2.4 Feature extraction — band power → amplitude (`features.py`)
 
@@ -149,7 +167,7 @@ welch_bandpower(x, fs, band):
   integrate only ~3–4 PSD bins.
 - **Per-channel vs all-channel:** a band may carry a 3rd tuple element = channel index. If valid,
   the feature is computed on that single channel; otherwise on all acquired channels and then
-  `np.nanmean`-reduced to a scalar in the loop (`sp_routes.py:539`).
+  `np.nanmean`-reduced to a scalar in the loop.
 
 #### Ratio features (e.g. Theta/Beta Ratio)
 A band config of the form `{"numerator": <band>, "denominator": <band>, ...}` is computed as:
@@ -160,7 +178,7 @@ with channel-specific variants supported, and divide-by-zero guarded (`denominat
 single-channel `→ 0.0`). This is how the ADHD **TBR** protocol works:
 `theta_beta_ratio = amp(4–8 Hz) / amp(15–18 Hz)`, mode `inhibit`.
 
-### 2.5 Baseline & threshold derivation (`sp_routes.py:541-576`)
+### 2.5 Baseline & threshold derivation (`sp_routes.py`)
 
 During the **first 30 s of every round** (`baseline_collection_duration`), each selected feature's
 per-epoch scalar is appended to a per-feature buffer. When `round_elapsed ≥ 30 s` the baseline
@@ -180,24 +198,22 @@ else:  # "enhance"                                        # we want the band to 
 - Baseline is **per-round** (`build_round_state()` re-creates buffers each round), so each round
   re-baselines for 30 s. A round shorter than 30 s never leaves baseline.
 
-#### The "z-score" (`sp_routes.py:588-592`)
+This inline static-threshold logic is the **only** thresholding the live loop uses.
+
+#### The "z-score" (`sp_routes.py`)
 The streamed `z_scores[feature]` is **not a statistical z-score** (no standard deviation):
 ```
 z = (value - threshold) / abs(threshold)        # relative deviation from threshold
 ```
 It's a normalized distance from the locked threshold, used to drive the sigmoid/linear mappings.
-(The `BaselineManager`/`AdaptiveThreshold` classes in `normalization.py` *do* implement a true
-mean/std z-score and an adaptive threshold, but the live loop does **not** use them — it uses the
-inline static-threshold logic above. Those classes are effectively dormant.)
 
-### 2.6 Smoothing (`smoothing.py` + inline EMA)
+### 2.6 Smoothing (inline EMA)
 
-- `smoothing.py::EMA` is the general exponential-moving-average helper: `v ← α·new + (1-α)·v`.
-- The live loop applies its **own inline EMA** to the *displayed* threshold only, to reduce visual
-  jitter (`sp_routes.py:730`): `α = 0.1`. The **scoring** always uses the raw locked threshold; only
-  the number shown to the clinician is smoothed.
+The live loop applies an **inline EMA** to the *displayed* threshold only, to reduce visual jitter
+(`sp_routes.py:717-718`): `α = 0.1` (`new_smoothed = 0.1·raw + 0.9·smoothed`). The **scoring**
+always uses the raw locked threshold; only the number shown to the clinician is smoothed.
 
-### 2.7 Success scoring & feedback (`sp_routes.py:626-675`)
+### 2.7 Success scoring & feedback (`sp_routes.py`)
 
 Three mapping types (start command `mapping`, default `fixed_threshold`):
 
@@ -222,15 +238,7 @@ overall_success_rate = mean(session_epoch_history)       # the headline % shown 
   "FEEDBACK RATE 49" gauge = `feedback × 100`), while **`overall_success_rate`** is the strict
   "all bands on target at once" hit-rate across the whole session (the true "% won").
 - `threshold_stats[feature]` is streamed only to supply **`current_threshold`** (chart threshold
-  line fallback on the frontend). It no longer carries any rolling success rate.
-
-> 🧹 **Removed dead code (cleanup):** the former per-feature rolling success history
-> (`threshold_success_history` = `deque(maxlen=60)`), the unread `session_success_history`, and the
-> `threshold_stats` fields `success_rate` / `samples_count` / `target_success_rate` /
-> `recent_values_mean` / `recent_values_std` were deleted. Their only consumer was the frontend
-> `getCurrentSuccessRates()` → `getSessionPerformanceSummary()` chain, which had **no callers** —
-> the values were computed and transmitted but never rendered. `feedback`, `overall_success_rate`,
-> the band bars, and the threshold line are unaffected. The dead frontend getters were removed too.
+  line fallback on the frontend).
 
 ### 2.8 Artifact detection (`artifact.py`) — informational only
 
@@ -304,7 +312,7 @@ finally: send Contl_STOP_AQU to device, acq.stop(), drop from active_connections
 - `/sp/nfcore_stop` (POST) — closes all active WebSocket connections (`active_connections` WeakSet).
 
 > ⚠️ **Architectural note:** all of transport, the round state machine, DSP orchestration, and payload
-> building live in this one ~970-line handler. There is **no DB write here** — session results are
+> building live in this one ~957-line handler. There is **no DB write here** — session results are
 > not persisted by the backend loop. The frontend is responsible for POSTing the finished session.
 
 ---
@@ -348,7 +356,7 @@ Produces exactly what the WebSocket loop consumes:
 `*_range` from UI → `UI_PREDEFINED_BANDS` label table → `cfg.bands` → parsed numeric label like `"10–20"`
 → else raise. This backward-compat ladder lets old protocols (saved before ranges were persisted) still resolve.
 
-### 4.4 Feature combination (`sp_routes.py:606-624`)
+### 4.4 Feature combination (`sp_routes.py`)
 With one feature, combined value = that value. With multiple:
 | `combination_method` | Formula |
 |---|---|
@@ -401,18 +409,17 @@ No Alembic — startup runs `create_all` then hand-rolled SQL in `app/core/migra
 
 ---
 
-## 7. Device modes & config
+## 7. Device acquisition & config (live path)
 
-`device_handlers/device_manager.py` reads `config.json → device.mode`:
-- `Auto` / `real` → try real I8 via `pythonnet` + `I8Library1.dll`; on failure → `mock_device.py`.
-- `demo` → straight to mock.
+The **live WebSocket loop talks to the device directly** — it instantiates `DeviceAcquisition` (serial)
+and falls back to `SimulatedAcquisition`. It does **not** go through any device-manager/mock abstraction.
 
-But note: the **live WebSocket loop does not go through `device_manager`** — it directly instantiates
-`DeviceAcquisition` (serial) and falls back to `SimulatedAcquisition`. The `mock_device.py` / `device_manager`
-path is used by the standalone collector/test tooling (`eeg_data_collector.py`, `test_device_acquisition.py`).
+- Real I8 hardware → `DeviceAcquisition` (serial @ 115200, 3 ch float32). See §2.2.
+- On real-device failure / no data in 2 s → `SimulatedAcquisition`. See §2.2.
 
-`config.json` is the single source of truth for device behavior: `serial_port`, mock channel/sampling params
-(8 main channels, 250 Hz, gain 24), and the collector's 24 channel labels (Ex1–A2).
+`config.json` supplies the live loop's `device.serial_port` (used by `find_serial_port`). The `cfg`
+object (`signal_processing/config.py`) supplies `fs` and default band definitions used as a
+resolution fallback in the protocol converter.
 
 ---
 
@@ -423,8 +430,8 @@ path is used by the standalone collector/test tooling (`eeg_data_collector.py`, 
 2. Backend loads protocol M1 → `protocol_to_signal_processing_format` →
    `bands = { theta:(4,8), beta:(15,18) [helpers], theta_beta_ratio:{num:theta,den:beta} }`,
    `feature_modes = { theta_beta_ratio: "inhibit" }`, `selected_features = ["theta_beta_ratio"]`.
-3. `round_duration = 1500/5 = 300 s`. Device probe fails on a dev Mac → `SimulatedAcquisition(fs=256, 3ch)`.
-4. Each second: read 256 samples → HP/LP/Notch filtfilt → `amp(4–8Hz)`, `amp(15–18Hz)` →
+3. `round_duration = 1500/5 = 300 s`. Device probe fails on a dev Mac → `SimulatedAcquisition(fs=250, 3ch)`.
+4. Each second: read 250 samples → HP/LP/Notch filtfilt → `amp(4–8Hz)`, `amp(15–18Hz)` →
    `TBR = amp_theta / amp_beta`.
 5. First 30 s: collect TBR into baseline buffer. At 30 s: `baseline_mean = mean(buffer)`,
    and since mode=inhibit → `threshold = baseline_mean * (1 - 0.20)` = 80% of baseline.
@@ -437,21 +444,19 @@ path is used by the standalone collector/test tooling (`eeg_data_collector.py`, 
 
 ---
 
-## 9. Known sharp edges & gotchas (verified in code)
+## 9. Known sharp edges & gotchas (live path only, verified in code)
 
 | # | Issue | Location | Impact |
 |---|---|---|---|
-| 1 | **fs mismatch 256 vs 250** — `cfg.fs=256` used for real device that streams 250 Hz | `config.py:11`, `sp_routes.py:207` | Band edges off by ~2.4% on real hardware |
-| 2 | **Dead "TEMPORARY TESTING" round_duration=30** overwritten 167 lines later | `sp_routes.py:94` vs `:261` | None (confusing only) — real value is total/rounds |
-| 3 | **"z_score" is not a z-score** — `(value−threshold)/|threshold|`, no std | `sp_routes.py:590` | Misnamed; fine for mapping, but don't trust as statistical z |
-| 4 | **`normalization.py` (BaselineManager/AdaptiveThreshold) is dormant** — live loop uses inline static thresholds instead | `normalization.py` | The "adaptive threshold" feature isn't actually wired into the live loop |
-| 5 | **Live amplitude artifact gate = 500,000 µV** → effectively disabled | `sp_routes.py:501` | Amplitude artifacts only flagged via blink/EMG in practice |
-| 6 | **No CAR / referencing in live path** | `PlotterAlignedFilterChain` | Single-channel placements unaffected; multi-channel has no spatial filter |
-| 7 | **Real device hard-fixed to 3 channels**, extra channels are cycled/repeated | `device_acquisition.py:69, 223` | "active_channel_count" defaults to 1 (CH1) unless a band names channels |
-| 8 | **WS loop never persists results** — relies entirely on frontend REST | `sp_routes.py` (no db.add) | If the renderer crashes post-session, the session is lost |
-| 9 | **Migrations re-inspect schema on every startup** (no versioning) | `app/core/migrations.py` (~994 lines) | Slow startup, hard to reason about; Alembic would help |
-| 10 | **LP cutoff really 40 Hz**, though `config.py` says bandpass `(0.5, 20)` | `preprocessing.py:103` | Config value is misleading; 40 Hz is intentional (needed for EMG detect) |
-| 11 | **`config.py:17` comment vs reality** — declares notch 50 Hz fixed (EU mains); US 60 Hz would need a change | `preprocessing.py:105` | Region-locked to 50 Hz |
+| 1 | ~~**fs mismatch 256 vs 250**~~ — **FIXED 2026-07-01**: `cfg.fs` now reads `collector.sampling_rate` (250) from `config.json` | `config.py` | Resolved; band edges + filter cutoffs now correct on real hardware (see §11) |
+| 2 | **"z_score" is not a z-score** — `(value−threshold)/|threshold|`, no std | `sp_routes.py` | Misnamed; fine for mapping, but don't trust as statistical z |
+| 3 | **Live amplitude artifact gate = 500,000 µV** → effectively disabled | `sp_routes.py` | Amplitude artifacts only flagged via blink/EMG in practice |
+| 4 | **No CAR / referencing in live path** | `PlotterAlignedFilterChain` | Single-channel placements unaffected; multi-channel has no spatial filter |
+| 5 | **Real device hard-fixed to 3 channels**, extra channels are cycled/repeated | `device_acquisition.py` | "active_channel_count" defaults to 1 (CH1) unless a band names channels |
+| 6 | **WS loop persists no DB row** — the session row still comes entirely from frontend REST (the WS loop now writes the filtered-EEG CSV to disk, but never touches SQLAlchemy) | `sp_routes.py` (no db.add) | If the renderer crashes post-session, the session **row** is lost (the EEG CSV on disk survives) |
+| 7 | **Migrations re-inspect schema on every startup** (no versioning) | `app/core/migrations.py` (~994 lines) | Slow startup, hard to reason about; Alembic would help |
+| 8 | **LP cutoff really 40 Hz**, though `config.py` says bandpass `(0.5, 20)` | `preprocessing.py` | Config value is misleading; 40 Hz is intentional (needed for EMG detect) |
+| 9 | **Notch region-locked to 50 Hz** (EU mains); US 60 Hz needs a code change | `preprocessing.py` | Not configurable at runtime |
 
 ---
 
@@ -495,19 +500,99 @@ shown_threshold ← 0.1·threshold + 0.9·shown_threshold            # EMA α=0.
 
 ## 11. Changelog
 
-**Dead-code removal (rolling success history).** Deleted the per-feature rolling success metric that
-was computed every epoch but never rendered:
-- **Backend** (`signal_processing/sp_routes.py`): removed `threshold_success_history` (`deque(maxlen=60)`)
-  from `build_round_state()`, removed the unread `session_success_history` accumulator, removed the
-  per-epoch appends and the now-unused `valid_features_this_epoch` list, slimmed `threshold_stats[feature]`
-  down to just `current_threshold` (the only field the frontend reads), and dropped the now-unused
-  `defaultdict` import.
-- **Frontend** (`renderer/js/core/WebSocketManager.js`): removed `getCurrentSuccessRates()` and
-  `getSessionPerformanceSummary()` (the only — and orphaned — consumers).
-- **Unaffected:** `feedback` (reward gauge), `overall_success_rate` (the headline "% won",
-  via `session_epoch_history`), the band amplitude bars, and the threshold line.
+### 2026-07-01 — Filtered EEG now recorded to CSV + `raw_data_file` populated
+- **Was:** the running app never wrote raw/filtered EEG to disk. The `raw_data_file` /
+  `processed_data_file` columns were **always NULL**; the only CSV was a frontend browser-download
+  (`SessionRecordingPanel.downloadSessionCsv`) of *per-epoch features*, opt-in and never linked to the
+  session row. The `eeg_data` WS stream re-sends an overlapping sliding window ~10×/s, so it can't
+  produce a faithful signal file.
+- **Now:** the WS loop records both the **raw** (pre-filter) and **post notch+bandpass** signal (µV)
+  once per epoch — `buffer` is the raw epoch fed to the filter chain, `x_clean` is its filtered
+  output (same shape, sample-aligned); overlap=0 so each epoch is a fresh non-overlapping block and
+  the recording is continuous with no duplicated samples. File:
+  `<db-dir>/eeg_recordings/eeg_filtered_p<patient>_<timestamp>.csv`, columns
+  `timestamp, sample_index, session_time_s, round, phase,` then a
+  `channel_<n>_raw_uv, channel_<n>_filtered_uv` pair **only for the channel(s) the protocol
+  works on** (`_active_indices`, i.e. channels named by the bands; defaults to **CH1** when no band
+  names one — the typical single-electrode case). `n` is the 1-based channel number. Opened before
+  the loop, flushed per epoch, closed in `finally`. The path is sent to the frontend on each
+  `round_complete` (`raw_data_file`), which stores it via `updateSession` on completion.
+- **Download:** the recording is served for download by `GET /sp/recording/{filename}`
+  (`FileResponse`, `Content-Disposition: attachment`; `os.path.basename` guards path traversal —
+  restricted to the recordings dir). The **Session Complete** modal now has a *Download EEG Signal
+  (raw + filtered)* button next to *Download Session CSV*. The backend path reaches the frontend on
+  every `feedback` tick and on `round_complete` (`raw_data_file`), so the button works even for
+  early-stopped sessions.
+- **Files:** `pyServer/signal_processing/sp_routes.py` (helpers `_eeg_recordings_dir`,
+  `_open_filtered_eeg_csv`; per-epoch write; cleanup close; `raw_data_file` on feedback +
+  `round_complete`; `GET /sp/recording/{filename}`),
+  `frontend/src/renderer/js/features/SessionRecordingPanel.js` (capture + persist path; modal button +
+  `downloadEegSignalCsv`), `.gitignore` (`eeg_recordings/` — the files contain PHI).
+- Also fixed two stray **256** sample-rate defaults in `SessionRecordingPanel.js` (lines 23 & 762)
+  → **250**, matching the backend fix below.
+
+### 2026-07-01 — Sampling rate sourced from config.json (signal-correctness fix)
+- **Bug:** `signal_processing/config.py` hardcoded `cfg.fs = 256`, but the I8 hardware and `config.json`
+  (`collector.sampling_rate`, `mock.sampling_rate`) stream **250 Hz**. Since `DeviceAcquisition`, the
+  `PlotterAlignedFilterChain`, and `welch_bandpower` are all built from `cfg.fs`, on **real hardware**
+  every frequency-domain calculation was biased by 256/250 ≈ **+2.4%**: band masks read too high (alpha
+  8–12 Hz actually integrated ~7.8–11.7 Hz), the 50 Hz notch landed at ~48.8 Hz (mains hum partly
+  un-notched), and each "1 s" epoch was really 1.024 s. Silent — nothing crashed. The simulator hid it
+  by generating at the same 256, so demo mode was self-consistent and looked correct.
+- **Fix:** `config.py::_device_sampling_rate()` now reads `collector.sampling_rate` from `config.json`
+  via `config_loader.get_collector_config()` (→ 250, fallback 250 if the loader is unavailable), and
+  `Config.fs` uses it as a `field(default_factory=...)`. Hardware and DSP now share one source of truth.
+- **Files:** `pyServer/signal_processing/config.py`.
+- **Unaffected:** relative success logic (threshold = baseline × (1 ± pct) — the scale cancels), the
+  simulator's internal consistency, and the band definitions themselves.
+
+### Earlier — Removed dead rolling success-history chain
+- Backend (`sp_routes.py`): removed `threshold_success_history` (`deque(maxlen=60)`),
+  `session_success_history`, `valid_features_this_epoch`, their per-epoch appends, and the unused
+  `defaultdict` import; slimmed `threshold_stats[feature]` to just `current_threshold`.
+- Frontend (`WebSocketManager.js`): removed the orphaned `getCurrentSuccessRates()` and
+  `getSessionPerformanceSummary()` consumers.
+- **Unaffected:** `feedback` (reward gauge), `overall_success_rate` (via `session_epoch_history`),
+  band amplitude bars, and the threshold line (`current_threshold`).
 
 ---
 
-*Generated from a full read of `pyServer/signal_processing/*`, `app/**`, `config.json`, and
-`protocols/*.json`. Line references are accurate as of branch `dev`, API v2.0.1.*
+## Appendix — code NOT used by the running app (do not re-document as live)
+
+These files/symbols exist in `pyServer/` but are **never imported by `create_app()` or the WS loop**.
+They are standalone demos, tooling, or dormant helpers. Listed so future docs don't treat them as live.
+
+**Dormant / unused signal-processing modules**
+- `signal_processing/normalization.py` (`BaselineManager`, `AdaptiveThreshold`) — the live loop uses
+  inline static thresholds, never these. Only imported by the standalone `main.py` / `main_device.py`.
+- `signal_processing/smoothing.py` (`EMA`) — the live loop's threshold smoothing is an inline EMA, not
+  this class. Only imported by the standalone scripts.
+- `signal_processing/live_pipeline.py` — referenced only in a comment; nothing imports it.
+- `signal_processing/main.py`, `signal_processing/main_device.py` — standalone demo entry points.
+
+**Dead functions inside otherwise-live modules**
+- `preprocessing.py`: `common_average_reference`, `laplacian_reference`, `design_notch`,
+  `design_bandpass`, `RealTimeFilter`, `preprocessing_pipeline`, and the local `amplitude_threshold_epochs`
+  — the live loop uses only `PlotterAlignedFilterChain` (and imports `amplitude_threshold_epochs` from
+  `artifact.py`, not here). `laplacian_reference` and `preprocessing_pipeline` have zero references anywhere.
+- `feedback.py`: `threshold_reward` — zero references anywhere (live loop uses `sigmoid_map`/`linear_map`).
+
+**Device tooling cluster (not in the live WS path)**
+- `device_handlers/device_manager.py`, `device_handlers/mock_device.py`,
+  `device_handlers/eeg_data_collector.py`. The live loop talks to
+  `DeviceAcquisition`/`SimulatedAcquisition` directly. These serve the standalone collector/test
+  tooling only.
+- Note: `config_loader.py` **is now in the live path** — `signal_processing/config.py` reads
+  `collector.sampling_rate` from it (2026-07-01 fix). It is no longer tooling-only.
+
+**Root-level scripts (tooling, not loaded by the runtime app)**
+- `create_default_user.py`, `initialize_protocols.py`, `run_migrations.py`,
+  `demo_protocol_workflow.py`, `realtime_plotter_mac.py`, `test_auth.py`,
+  `test_device_acquisition.py`, `test_syntax.py`.
+- `app/NetrwTreeListing` — empty Vim netrw artifact (junk).
+
+---
+
+*Generated from a full read of the live import graph (`app/core/main.py` → routers → `sp_routes.py`
+→ DSP modules), `app/**`, `config.json`, and `protocols/*.json`. Scoped to in-use code as of branch
+`dev`, API v2.0.1.*

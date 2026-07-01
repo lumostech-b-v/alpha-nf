@@ -1,4 +1,6 @@
 import time
+import os
+import csv
 import numpy as np
 import logging
 import asyncio
@@ -7,7 +9,7 @@ from datetime import datetime, timezone
 from weakref import WeakSet
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from app.protocols import crud as protocol_crud
 from app.protocols.utils import protocol_to_signal_processing_format
 from app.patients.crud import PatientCRUD
@@ -25,6 +27,50 @@ VISUALIZATION_Y_LIMITS = (-150.0, 150.0)
 
 LOGGER_NAME = "pyserver.api"
 logger = logging.getLogger(LOGGER_NAME)
+
+
+def _eeg_recordings_dir() -> str:
+    """
+    Return a writable directory for filtered-EEG recordings, alongside the
+    app database (user-data dir on packaged builds, pyServer/ in dev).
+    """
+    try:
+        from app.core.database import get_database_path
+        base = os.path.dirname(get_database_path())
+    except Exception:
+        base = os.getcwd()
+    rec_dir = os.path.join(base, "eeg_recordings")
+    os.makedirs(rec_dir, exist_ok=True)
+    return rec_dir
+
+
+def _open_filtered_eeg_csv(patient_id, channel_indices):
+    """
+    Open a CSV that records the EEG signal both RAW (pre-filter) and AFTER the
+    notch + bandpass filter chain, for the channels the protocol actually uses
+    (values in µV). channel_indices are 0-based; columns are labelled with the
+    1-based channel number. Returns (file_handle, csv_writer, path) or
+    (None, None, None) if it could not be created. One row per sample.
+    """
+    try:
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        pid = patient_id if patient_id is not None else "unknown"
+        path = os.path.join(_eeg_recordings_dir(), f"eeg_filtered_p{pid}_{ts}.csv")
+        f = open(path, "w", newline="", encoding="utf-8")
+        writer = csv.writer(f)
+        header = ["timestamp", "sample_index", "session_time_s", "round", "phase"]
+        for idx in channel_indices:
+            header += [f"channel_{idx + 1}_raw_uv", f"channel_{idx + 1}_filtered_uv"]
+        writer.writerow(header)
+        f.flush()
+        logger.info(
+            "Recording raw + filtered (post notch+bandpass) EEG for channels %s to %s",
+            [idx + 1 for idx in channel_indices], path,
+        )
+        return f, writer, path
+    except Exception as e:
+        logger.error("Could not open EEG recording CSV, recording disabled: %s", e)
+        return None, None, None
 
 router = APIRouter(prefix="/sp", tags=["Signal Processing"])
 
@@ -63,6 +109,7 @@ async def device_status() -> JSONResponse:
 async def nfcore(websocket: WebSocket) -> None:
     """WebSocket endpoint for real-time neurofeedback signal processing"""
     acq = None
+    eeg_csv_file = None
     try:
         await websocket.accept()
         active_connections.add(websocket)
@@ -245,6 +292,18 @@ async def nfcore(websocket: WebSocket) -> None:
 
             buffer = np.zeros((0, device_channels), dtype=np.float64)
 
+            # Record the filtered EEG signal (post notch+bandpass) to a CSV on disk,
+            # but only for the channels the protocol actually works on (defaults to
+            # CH1 when no band names a channel — the typical single-electrode case).
+            eeg_csv_channel_indices = sorted(_active_indices) if _active_indices else [0]
+            eeg_csv_channel_indices = [i for i in eeg_csv_channel_indices if 0 <= i < device_channels]
+            if not eeg_csv_channel_indices:
+                eeg_csv_channel_indices = [0]
+            eeg_csv_file, eeg_csv_writer, eeg_csv_path = _open_filtered_eeg_csv(
+                patient_id, eeg_csv_channel_indices
+            )
+            eeg_sample_index = 0
+
             # Session variables
             logger.info("Starting device-backed neurofeedback loop with rounds")
             session_start_time = time.time()
@@ -310,6 +369,7 @@ async def nfcore(websocket: WebSocket) -> None:
                         "round_number": current_round,
                         "total_rounds": session_rounds,
                         "round_duration": round_elapsed,
+                        "raw_data_file": eeg_csv_path,
                         "timestamp": datetime.now(timezone.utc).isoformat()
                     })
 
@@ -600,6 +660,35 @@ async def nfcore(websocket: WebSocket) -> None:
                         "Training in progress" if round_state["baseline_locked"] else "Taking baseline"
                     )
 
+                    # Persist the EEG signal both raw (pre-filter) and filtered
+                    # (post notch+bandpass), in µV. buffer is the raw epoch fed into
+                    # the filter chain; x_clean is its filtered output — same shape,
+                    # aligned sample-by-sample. overlap=0 so each epoch is a fresh,
+                    # non-overlapping block: the recording is continuous, no duplicates.
+                    if eeg_csv_writer is not None:
+                        try:
+                            raw_uv = buffer * VISUALIZATION_SCALE
+                            x_clean_uv = x_clean * VISUALIZATION_SCALE
+                            row_ts = datetime.now(timezone.utc).isoformat()
+                            epoch_session_time = time.time() - session_start_time
+                            for s in range(x_clean_uv.shape[0]):
+                                channel_cols = []
+                                for ch in eeg_csv_channel_indices:
+                                    channel_cols.append(round(float(raw_uv[s, ch]), 4))
+                                    channel_cols.append(round(float(x_clean_uv[s, ch]), 4))
+                                eeg_csv_writer.writerow([
+                                    row_ts,
+                                    eeg_sample_index,
+                                    round(epoch_session_time + s / fs, 4),
+                                    current_round,
+                                    training_phase,
+                                    *channel_cols,
+                                ])
+                                eeg_sample_index += 1
+                            eeg_csv_file.flush()
+                        except Exception as e:
+                            logger.error("Failed writing EEG row: %s", e)
+
                     # Combine features
                     if len(feature_values) == 1:
                         combined_value = list(feature_values.values())[0]
@@ -792,6 +881,7 @@ async def nfcore(websocket: WebSocket) -> None:
                             "combined_value": float(combined_value),
                             "feedback": feedback_val,
                             "overall_success_rate": overall_success_rate,
+                            "raw_data_file": eeg_csv_path,
                             "individual_features": {},
                             "z_scores": z_scores,
                             "raw_band_powers": {},
@@ -928,6 +1018,14 @@ async def nfcore(websocket: WebSocket) -> None:
             except Exception as e:
                 logger.error(f"Error stopping device: {e}")
 
+        # Close the filtered-EEG recording file
+        if eeg_csv_file is not None:
+            try:
+                eeg_csv_file.close()
+                logger.info("Closed filtered EEG recording file")
+            except Exception as e:
+                logger.error(f"Error closing filtered EEG file: {e}")
+
         active_connections.discard(websocket)
 
 
@@ -955,3 +1053,17 @@ async def stop_nfcore() -> JSONResponse:
             "message": f"Failed to stop: {str(e)}",
             "timestamp": datetime.now(timezone.utc).isoformat()
         }, status_code=500)
+
+
+@router.get("/recording/{filename}")
+async def get_recording(filename: str):
+    """
+    Serve a recorded EEG signal CSV (raw + post notch+bandpass) for download.
+    Restricted to files inside the recordings dir; the basename guards against
+    path traversal.
+    """
+    safe_name = os.path.basename(filename)
+    path = os.path.join(_eeg_recordings_dir(), safe_name)
+    if not safe_name.lower().endswith(".csv") or not os.path.isfile(path):
+        return JSONResponse({"error": "Recording not found"}, status_code=404)
+    return FileResponse(path, media_type="text/csv", filename=safe_name)

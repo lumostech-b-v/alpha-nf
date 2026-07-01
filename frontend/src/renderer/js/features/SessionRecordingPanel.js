@@ -20,12 +20,14 @@ class SessionRecordingPanel {
     this.plotsInitialized = false;
     this.timerStarted = false; // Track if timer has started (only start when data streams)
     this.feedbackType = 'Image'; // Default feedback type
-    this.sampleRate = 256; // Default sample rate, will be updated from settings
+    this.sampleRate = 250; // Default sample rate (I8 hardware), will be updated from settings
     this.latestSuccessRate = null; // Track the latest overall success rate from feedback
     this.artifactState = { active: false }; // Artifact overlay state for EEG plots
     this.csvRows = []; // Accumulated per-epoch rows for CSV export
     this._csvFeedbackCallback = null; // Reference kept so we can deregister it
     this._csvCurrentRound = 1; // Tracked round number for CSV rows
+    this.rawDataFile = null; // Backend path of the filtered-EEG CSV (post notch+bandpass)
+    this._rawFileCallback = null; // Reference kept so we can deregister it
 
     // Y-axis scaling configuration
     this.yAxisConfig = {
@@ -381,7 +383,7 @@ class SessionRecordingPanel {
         info.dpr = dpr;
         // Redraw with current values if we have any
         if (info.values.length > 0) {
-          const sampleRate = this.sampleRate || 256;
+          const sampleRate = this.sampleRate || 250;
           const vals = info.values;
           let minVal = vals[0], maxVal = vals[0];
           for (const v of vals) { if (v < minVal) minVal = v; if (v > maxVal) maxVal = v; }
@@ -461,8 +463,8 @@ class SessionRecordingPanel {
     }
     
     // Show last 5 seconds of data for better waveform visibility
-    // Use sampleRate from settings, fallback to 256 if not set yet
-    const sampleRate = this.sampleRate || 256;
+    // Use sampleRate from settings, fallback to 250 if not set yet
+    const sampleRate = this.sampleRate || 250;
     const samplesToShow = sampleRate * 2;
     
     // channelData should be an array where each element is an array of values for one channel
@@ -556,14 +558,14 @@ class SessionRecordingPanel {
         }
         
         // Draw the EEG data with calculated limits
-        const sampleRate = this.sampleRate || 256;
+        const sampleRate = this.sampleRate || 250;
         const dpr = plotInfo.dpr || window.devicePixelRatio || 1;
         this.drawEEGPlot(ctx, values, canvas.width / dpr, canvas.height / dpr, minVal, maxVal, color, sampleRate);
       }
     }
   }
   
-  drawEEGPlot(ctx, values, width, height, minValue, maxValue, color = '#60a5fa', sampleRate = 256) {
+  drawEEGPlot(ctx, values, width, height, minValue, maxValue, color = '#60a5fa', sampleRate = 250) {
     if (!ctx || values.length === 0) return;
 
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -721,7 +723,7 @@ class SessionRecordingPanel {
 
   redrawAllPlots() {
     if (!this.plotData) return;
-    const sampleRate = this.sampleRate || 256;
+    const sampleRate = this.sampleRate || 250;
     Object.values(this.plotData).forEach(info => {
       if (!info || !info.ctx) return;
       const { canvas, ctx, values, color } = info;
@@ -759,7 +761,7 @@ class SessionRecordingPanel {
     this.protocol = planningPanel.currentSessionInfo?.protocol || null;
     const settings = preparationPanel.getSessionSettings();
     this.feedbackType = settings.feedback_type || 'Image';
-    this.sampleRate = settings.sample_rate || 256; // Store sample rate for plot window calculation
+    this.sampleRate = settings.sample_rate || 250; // Store sample rate for plot window calculation
     
     try {
       const userId = window.neuroFeedbackApp?.getCurrentUserId?.() || localStorage.getItem('currentUserId');
@@ -841,6 +843,7 @@ class SessionRecordingPanel {
       // Reset CSV buffer and register callbacks to accumulate data rows
       this.csvRows = [];
       this._csvCurrentRound = 1;
+      this.rawDataFile = null;
       const ws = window.websocket;
       if (ws) {
         // Remove any stale callbacks
@@ -852,10 +855,17 @@ class SessionRecordingPanel {
           const idx = ws.callbacks.onRoundStart.indexOf(this._csvRoundCallback);
           if (idx > -1) ws.callbacks.onRoundStart.splice(idx, 1);
         }
+        if (this._rawFileCallback && ws.callbacks?.onRoundComplete) {
+          const idx = ws.callbacks.onRoundComplete.indexOf(this._rawFileCallback);
+          if (idx > -1) ws.callbacks.onRoundComplete.splice(idx, 1);
+        }
         this._csvFeedbackCallback = (data) => this.recordCsvRow(data);
         this._csvRoundCallback = (data) => { this._csvCurrentRound = data.round_number ?? this._csvCurrentRound; };
+        // Backend reports the filtered-EEG CSV path on each round_complete
+        this._rawFileCallback = (data) => { if (data?.raw_data_file) this.rawDataFile = data.raw_data_file; };
         if (ws.callbacks?.onFeedback) ws.callbacks.onFeedback.push(this._csvFeedbackCallback);
         if (ws.callbacks?.onRoundStart) ws.callbacks.onRoundStart.push(this._csvRoundCallback);
+        if (ws.callbacks?.onRoundComplete) ws.callbacks.onRoundComplete.push(this._rawFileCallback);
       }
 
       // Don't start timer yet - wait for data to start streaming
@@ -1670,6 +1680,11 @@ class SessionRecordingPanel {
         if (idx > -1) wsCallbacks.onRoundStart.splice(idx, 1);
         this._csvRoundCallback = null;
       }
+      if (this._rawFileCallback && wsCallbacks?.onRoundComplete) {
+        const idx = wsCallbacks.onRoundComplete.indexOf(this._rawFileCallback);
+        if (idx > -1) wsCallbacks.onRoundComplete.splice(idx, 1);
+        this._rawFileCallback = null;
+      }
 
       // Stop WebSocket session (this will disconnect and trigger device stop command)
       window.websocket?.stopLiveSession?.() || window.ui?.stopLiveSession?.();
@@ -1683,15 +1698,20 @@ class SessionRecordingPanel {
       // Complete session in database
       if (sessionIdToComplete) {
         try {
-          // Update session with overall_success_rate if available
+          // Update session with overall_success_rate and the filtered-EEG file path
+          const updatePayload = {};
           if (this.latestSuccessRate !== null && this.latestSuccessRate !== undefined) {
+            updatePayload.overall_success_rate = this.latestSuccessRate;
+          }
+          if (this.rawDataFile) {
+            updatePayload.raw_data_file = this.rawDataFile;
+          }
+          if (Object.keys(updatePayload).length > 0) {
             try {
-              await window.api.updateSession(sessionIdToComplete, {
-                overall_success_rate: this.latestSuccessRate
-              });
-              console.log('Session success rate updated:', this.latestSuccessRate);
+              await window.api.updateSession(sessionIdToComplete, updatePayload);
+              console.log('Session updated on complete:', updatePayload);
             } catch (updateError) {
-              console.warn('Error updating session success rate:', updateError);
+              console.warn('Error updating session on complete:', updateError);
             }
           }
 
@@ -1754,10 +1774,14 @@ class SessionRecordingPanel {
           <button class="btn btn-secondary" style="flex:1;" id="sessionCompleteStayBtn">Stay Here</button>
           <button class="btn btn-primary" style="flex:1;" id="sessionCompleteAnalyticsBtn">View Analytics</button>
         </div>
-        <div style="padding:0 24px 20px;">
+        <div style="padding:0 24px 20px;display:flex;flex-direction:column;gap:8px;">
           <button class="btn btn-secondary" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;" id="sessionCompleteCsvBtn">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
             Download Session CSV
+          </button>
+          <button class="btn btn-secondary" style="width:100%;display:flex;align-items:center;justify-content:center;gap:6px;${this.rawDataFile ? '' : 'opacity:0.5;'}" id="sessionCompleteEegBtn">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download EEG Signal (raw + filtered)
           </button>
         </div>
       </div>`;
@@ -1786,6 +1810,26 @@ class SessionRecordingPanel {
     document.getElementById('sessionCompleteCsvBtn').addEventListener('click', () => {
       this.downloadSessionCsv();
     });
+
+    document.getElementById('sessionCompleteEegBtn').addEventListener('click', () => {
+      this.downloadEegSignalCsv();
+    });
+  }
+
+  // Download the backend-recorded EEG signal file (raw + post notch+bandpass, 250 Hz).
+  downloadEegSignalCsv() {
+    if (!this.rawDataFile) {
+      window.ui?.showNotification?.('No EEG signal recording is available for this session', 'warning');
+      return;
+    }
+    const filename = String(this.rawDataFile).split(/[\\/]/).pop();
+    const base = (window.api?.baseURL || 'http://localhost:8000').replace(/\/$/, '');
+    const a = document.createElement('a');
+    a.href = `${base}/sp/recording/${encodeURIComponent(filename)}`;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   // ====================================
@@ -1794,6 +1838,10 @@ class SessionRecordingPanel {
 
   recordCsvRow(data) {
     if (!data || data.type !== 'feedback') return;
+
+    // Capture the backend EEG-recording path (arrives on every feedback tick),
+    // so the "Download EEG Signal" button works even for early-stopped sessions.
+    if (data.raw_data_file) this.rawDataFile = data.raw_data_file;
 
     const row = {
       timestamp: data.timestamp || new Date().toISOString(),

@@ -41,7 +41,16 @@
       "Bash(python -c \"import ast; ast.parse\\(open\\('signal_processing/sp_routes.py'\\).read\\(\\)\\); print\\('sp_routes.py OK'\\)\")",
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('signal_processing/sp_routes.py'\\).read\\(\\)\\); print\\('sp_routes.py OK'\\)\")",
       "Bash(node --check ../frontend/src/renderer/js/core/WebSocketManager.js)",
-      "Bash(pkill -f \"uvicorn app.core.main\")"
+      "Bash(pkill -f \"uvicorn app.core.main\")",
+      "Bash(python3 *)",
+      "Bash(awk *)",
+      "Bash(node --check frontend/src/renderer/js/features/SessionRecordingPanel.js)",
+      "Bash(perl -0pi -e 's/this\\\\.sampleRate \\\\|\\\\| 256/this.sampleRate || 250/g; s/fallback to 256 if not set yet/fallback to 250 if not set yet/g; s/sampleRate = 256\\\\\\)/sampleRate = 250\\)/g' SessionRecordingPanel.js)",
+      "Bash(node --check SessionRecordingPanel.js)",
+      "Bash(command -v npm)",
+      "Bash(break)",
+      "Bash(ls .venv/bin/uvicorn)",
+      "Bash(.venv/bin/uvicorn app.core.main:app *)"
     ]
   }
 }

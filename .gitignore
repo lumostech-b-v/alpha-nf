@@ -9,6 +9,8 @@ venv/
 env/
 
 ./eeg_data/
+eeg_recordings/
+pyServer/eeg_recordings/
 .DS_Store*
 ./.DS_Store*
 

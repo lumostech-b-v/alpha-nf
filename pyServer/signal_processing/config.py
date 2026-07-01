@@ -4,11 +4,26 @@ Central configuration for the neurofeedback pipeline.
 Adjust sampling rate, bands of interest, window sizes, etc.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+
+def _device_sampling_rate() -> int:
+    """
+    Sampling rate must match what the hardware actually streams, otherwise the
+    Welch frequency axis and every filter cutoff are biased (see BACKEND_MASTER_DOC).
+    The single source of truth is config.json (collector.sampling_rate == 250 Hz
+    for the I8 device); fall back to 250 if the loader is unavailable.
+    """
+    try:
+        from config_loader import get_collector_config
+        return int(get_collector_config().get("sampling_rate", 250))
+    except Exception:
+        return 250
+
 
 @dataclass
 class Config:
-    fs: int = 256                 # sampling rate (Hz)
+    fs: int = field(default_factory=_device_sampling_rate)  # sampling rate (Hz) — from config.json
     channels: int = 8             # number of EEG channels
     buffer_seconds: float = 4.0   # ring buffer length (s) for features
     epoch_seconds: float = 1.0    # processing epoch length (s)
