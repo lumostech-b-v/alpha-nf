@@ -225,18 +225,21 @@ Three mapping types (start command `mapping`, default `fixed_threshold`):
 
 Aggregation:
 ```
-feedback_val = mean(per-feature success)                 # the continuous "reward" 0..1 streamed each second
-
 # Epoch win = ALL features must win simultaneously (binarised at 0.5):
 epoch_binary = 1.0 if (every feature's binary success == 1) else 0.0
+
+feedback_val = epoch_binary                              # streamed each second — same all-or-nothing value
 
 session_epoch_history.append(epoch_binary)               # one entry per epoch, survives round resets
 overall_success_rate = mean(session_epoch_history)       # the headline % shown to clinician
 ```
 
-- So **`feedback`** is a soft per-second reward signal (drives the visual/animation, e.g. the
-  "FEEDBACK RATE 49" gauge = `feedback × 100`), while **`overall_success_rate`** is the strict
-  "all bands on target at once" hit-rate across the whole session (the true "% won").
+- **`feedback_val`** is now the same all-or-nothing value as `epoch_binary` (`0.0`/`1.0`, all
+  selected features must pass simultaneously) rather than a mean of per-feature success — it used
+  to be `mean(per-feature success)`, which gave partial credit and a continuous 0..1 value whenever
+  more than one feature was selected; that was changed so the per-second "reward" gauge always
+  matches the strict win condition. **`overall_success_rate`** remains the session-wide hit-rate
+  across all epochs (the true "% won").
 - `threshold_stats[feature]` is streamed only to supply **`current_threshold`** (chart threshold
   line fallback on the frontend).
 
@@ -488,8 +491,8 @@ sigmoid: success = 1/(1+e^(−5·z))            (z negated for inhibit)
 linear:  success = clip(0.5·z + 0.5, 0, 1)   (z negated for inhibit)
 
 # Aggregation
-feedback_val         = mean(per-feature success)                 # soft reward 0..1, streamed each second
 epoch_binary         = 1 if ALL features' binary success == 1 else 0
+feedback_val         = epoch_binary                              # streamed each second, all-or-nothing
 overall_success_rate = mean(epoch_binary over whole session)     # headline %
 
 # Display threshold smoothing (display only, not scoring)

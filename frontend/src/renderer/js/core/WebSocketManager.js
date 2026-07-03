@@ -656,7 +656,7 @@ class WebSocketManager {
             feature_modes: { alpha: 'enhance' },
             feature_weights: { alpha: 1.0 },
             combination_method: 'weighted_average',
-            mapping: 'sigmoid',
+            mapping: 'fixed_threshold',
             protocol_type: 'alpha',
             session_rounds: 5,
             // TEMPORARY TESTING: Change session duration to 150 seconds (5 rounds × 30 seconds)

@@ -700,7 +700,6 @@ async def nfcore(websocket: WebSocket) -> None:
                     if not round_state["baseline_locked"]:
                         feedback_val = 0.0
                     else:
-                        feature_successes = []
                         feature_binaries = []
                         for feature_name in selected_features:
                             threshold = round_state["feature_thresholds"].get(feature_name)
@@ -728,14 +727,13 @@ async def nfcore(websocket: WebSocket) -> None:
                                 else:
                                     success = 1.0 if value <= threshold else 0.0
 
-                            feature_successes.append(success)
                             feature_binaries.append(1.0 if success >= 0.5 else 0.0)
 
                         # Epoch counts as a win only if every feature wins
                         epoch_binary = 1.0 if feature_binaries and all(b == 1.0 for b in feature_binaries) else 0.0
                         session_epoch_history.append(epoch_binary)
 
-                        feedback_val = float(np.mean(feature_successes)) if feature_successes else 0.0
+                        feedback_val = epoch_binary
 
                     # Send updates
                     current_time = time.time()

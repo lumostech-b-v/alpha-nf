@@ -23,7 +23,7 @@ class SessionPreparationPanel {
       session_duration: 1500,   // Default to 25 minutes (1500 seconds) for 5 rounds = 5 minutes per round
       sample_rate: 250,
       channels: [],
-      mapping: 'sigmoid',
+      mapping: 'fixed_threshold',
       success_rate: 0.7,
       feedback_type: 'Image',
       reward_threshold_percentage: 20.0,  // Default to 20%
@@ -347,7 +347,7 @@ class SessionPreparationPanel {
       session_duration: 1500, // 25 minutes (5 rounds × 5 min)
       sample_rate: 250,
       channels: [],
-      mapping: 'sigmoid',
+      mapping: 'fixed_threshold',
       success_rate: 0.7,
       feedback_type: 'Image',
       reward_threshold_percentage: 20.0,  // Default to 20%
