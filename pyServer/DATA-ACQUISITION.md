@@ -73,25 +73,24 @@ until enough samples have arrived.
 
 ## 4. Starting a session — `signal_processing/sp_routes.py`
 
-The WebSocket endpoint `/sp/nfcore_start` drives the whole session. It tries the
-real device first, and **falls back to a simulator if the device is silent**:
+The WebSocket endpoint `/sp/nfcore_start` drives the whole session. It requires the
+real device — **no simulator fallback** (removed 2026-07-03):
 
 ```python
 try:
-    acq = DeviceAcquisition(target_channels=3, fs=cfg.fs, verbose=True)
+    acq = DeviceAcquisition(fs=cfg.fs, verbose=True)
     acq.send_command("Contl_STRT_AQU")
     test_block = acq.read_samples(10, timeout=2.0)
     if test_block is None or test_block.size == 0:
-        use_simulated = True   # device connected but not sending data
+        # device connected but not sending data -> send WS error, abort session
 except Exception:
-    use_simulated = True       # device not found at all
-
-if use_simulated:
-    from signal_processing.acquisition import SimulatedAcquisition
-    acq = SimulatedAcquisition(fs=cfg.fs, channels=3)
+    # device not found at all -> send WS error, abort session
 ```
 
-This means the app is always usable in a demo, even with no hardware plugged in.
+`DeviceAcquisition.read_samples()` still reads all 3 floats/sample off the wire but returns only
+column 0 (CH1) to the caller — see `device_acquisition.py`. If the device is missing or silent, the
+session now fails outright instead of falling back to `SimulatedAcquisition`; the app is no longer
+demoable without real hardware attached.
 
 ## 5. Reading 1-second epochs
 

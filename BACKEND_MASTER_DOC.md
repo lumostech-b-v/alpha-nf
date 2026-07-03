@@ -15,7 +15,7 @@
 The backend is a **FastAPI app on `localhost:8000`** that:
 
 1. Serves CRUD REST APIs for **users, patients, protocols, treatment plans, and sessions** (SQLite via SQLAlchemy).
-2. Owns the **EEG device I/O** (real serial I8 hardware, or a simulator fallback) inside the WebSocket loop.
+2. Owns the **EEG device I/O** (real serial I8 hardware only, no simulator fallback) inside the WebSocket loop.
 3. Runs the **real-time neurofeedback DSP loop** over a single WebSocket (`/sp/nfcore_start`):
    acquire → filter → extract band features → collect baseline → derive thresholds →
    score success → stream feedback to the renderer ~1×/sec.
@@ -59,8 +59,7 @@ app/core/main.py
  ├─ app/planning   (models, schemas, crud, routes)
  ├─ app/core       (database, auth, migrations, schemas)
  └─ signal_processing/sp_routes.py   ← the WebSocket DSP loop, which imports:
-        ├─ device_acquisition.py   (DeviceAcquisition, find_serial_port)
-        ├─ acquisition.py          (SimulatedAcquisition fallback)
+        ├─ device_acquisition.py   (DeviceAcquisition, find_serial_port — real device only, no fallback)
         ├─ config.py               (cfg)
         ├─ preprocessing.py        (PlotterAlignedFilterChain — only)
         ├─ features.py             (compute_features)
@@ -110,15 +109,15 @@ The DSP stages are composable modules, wired together inside the WebSocket handl
 
 **Real device** — `signal_processing/device_acquisition.py::DeviceAcquisition`
 - Serial @ **115200 baud**, port from `config.json → device.serial_port` or auto-detected (`find_serial_port`, cross-platform: COM* on Windows, `/dev/cu.*` / `/dev/tty.*` on macOS).
-- A background thread reads bytes, unpacks **3 little-endian float32** per sample (`struct.unpack('<fff')` = 12 bytes/sample), and pushes `[c1,c2,c3]` into a thread-safe buffer (capped 1000 samples).
-- `read_samples(n)` pops `n` rows; **channel count is hard-fixed to 3** (the serial protocol). If a caller requests more channels, channels are **cycled/repeated** to fill (`out[i, ch] = out[i, ch % 3]`).
+- A background thread reads bytes, unpacks **3 little-endian float32** per sample (`struct.unpack('<fff')` = 12 bytes/sample) — the wire protocol is unchanged — but `read_samples(n)` now returns **only column 0 (CH1)**; the other two floats are read off the wire and discarded. There is no channel cycling/expansion anymore.
 
-**Simulator fallback** — `signal_processing/acquisition.py::SimulatedAcquisition`
-- Imported inline and used whenever the real device fails or sends no data within 2 s (`sp_routes.py:231-233`, constructed as `SimulatedAcquisition(fs=cfg.fs, channels=3)`).
-- Synthesises EEG as a sum of sinusoids (per channel, µV amplitudes):
-  - alpha 10 Hz @ 50 µV, beta 20 Hz @ 20 µV, theta 6 Hz @ 30 µV, drift 1 Hz @ 10 µV, Gaussian noise @ 5 µV.
-- **Real-time pacing:** sleeps `num_samples/fs` of wall-clock per read so the loop runs at true device speed (otherwise it free-runs and artifact injection collapses).
-- **Deterministic artifact injection** on an 18 s cycle for UI testing: eye-blink (t=3 s, derivative-of-Gaussian ~90 µV ptp), high-amplitude spike (t=9 s, ~260 µV), EMG burst (t=15 s, 70 Hz). Amplitudes are tuned against the detector thresholds.
+**No simulator fallback (as of 2026-07-03)** — the WS loop requires the real device. `sp_routes.py`
+probes `DeviceAcquisition` for up to 2 s (`read_samples(10, timeout=2.0)`); if construction fails or
+no data arrives, it sends a WS `{"type": "error", ...}` message and returns instead of ever
+constructing `SimulatedAcquisition`. `signal_processing/acquisition.py::SimulatedAcquisition` still
+exists (sinusoid synthesiser with deterministic artifact injection, used by standalone
+scripts/tests) but the live loop no longer imports or falls back to it — a disconnected/absent
+device now fails the session instead of silently demoing with fake data.
 
 > ✅ **fs now sourced from config.json (fixed 2026-07-01):** `cfg.fs` previously hardcoded **256**
 > while the I8 hardware and `config.json` stream **250 Hz**. Because `DeviceAcquisition`, the filter
@@ -165,18 +164,17 @@ welch_bandpower(x, fs, band):
   signal is converted **volts → µV** first (`VISUALIZATION_SCALE = 1e6`), so features come out in **µV**.
 - **Frequency resolution** is ~1 Hz (1 s Hann window). Narrow bands (e.g. SMR 12–15 Hz) therefore
   integrate only ~3–4 PSD bins.
-- **Per-channel vs all-channel:** a band may carry a 3rd tuple element = channel index. If valid,
-  the feature is computed on that single channel; otherwise on all acquired channels and then
-  `np.nanmean`-reduced to a scalar in the loop.
+- **Single channel only (as of 2026-07-03):** `x_bp` is always the one acquired channel (CH1) —
+  there is no per-channel/all-channel branch anymore. Protocol `channels` (e.g. `["Cz"]`) is a pure
+  electrode-placement label for the UI/reports; it is never read as a signal-routing index.
 
 #### Ratio features (e.g. Theta/Beta Ratio)
 A band config of the form `{"numerator": <band>, "denominator": <band>, ...}` is computed as:
 ```
 ratio = amplitude(numerator_band) / amplitude(denominator_band)
 ```
-with channel-specific variants supported, and divide-by-zero guarded (`denominator==0 → 1e-10`, or
-single-channel `→ 0.0`). This is how the ADHD **TBR** protocol works:
-`theta_beta_ratio = amp(4–8 Hz) / amp(15–18 Hz)`, mode `inhibit`.
+divide-by-zero guarded (`denominator==0 → 1e-10`, or `→ 0.0` if either amplitude is missing). This
+is how the ADHD **TBR** protocol works: `theta_beta_ratio = amp(4–8 Hz) / amp(15–18 Hz)`, mode `inhibit`.
 
 ### 2.5 Baseline & threshold derivation (`sp_routes.py`)
 
@@ -267,7 +265,7 @@ accept → send "welcome" → receive start_command → echo
    ↓ (start_command.start == true)
 load protocol (DB) OR legacy inline bands  →  resolve patient name  →  validate features
    ↓
-init device (try real, 2 s data probe → fall back to SimulatedAcquisition)
+init device (real device only; 2 s data probe → on failure, send WS error and abort — no fallback)
    ↓
 build round_state (baseline buffers, thresholds, success history)
    ↓
@@ -281,7 +279,7 @@ WHILE current_round ≤ session_rounds:
          block = acq.read_samples(step_samples)                [the real ~1 s pace-gate]
          buffer = last epoch_samples of vstack(buffer, block)
          x_clean = filter_chain.process(buffer)
-         send "eeg_data"        (≤10 Hz, scaled to µV, 3 channels, signal_stats)
+         send "eeg_data"        (≤10 Hz, scaled to µV, 1 channel (CH1), signal_stats)
          artifact check → maybe send "artifact"
          features = compute_features(x_clean*1e6, …)
          update baseline buffers / lock thresholds at 30 s
@@ -348,7 +346,8 @@ finally: send Contl_STOP_AQU to device, acq.stop(), drop from active_connections
 
 ### 4.3 Conversion to DSP format — `app/protocols/utils.py::protocol_to_signal_processing_format`
 Produces exactly what the WebSocket loop consumes:
-- `bands` — `{name: (low, high)}` or `(low, high, channel_idx)` for regular; `{numerator, denominator, …}` for ratio.
+- `bands` — `{name: (low, high)}` for regular; `{numerator, denominator, …}` for ratio (no channel
+  index in either — `channels` is a separate, purely descriptive field).
 - `feature_modes` — `{name: "enhance"|"inhibit"}` (reward→enhance, inhibit→inhibit).
 - `feature_weights` — `{name: weight}` (default 1.0; used by `weighted_average`).
 - `selected_features` — the bands to score, **excluding helper sub-bands** added only to support a ratio
@@ -415,10 +414,13 @@ No Alembic — startup runs `create_all` then hand-rolled SQL in `app/core/migra
 ## 7. Device acquisition & config (live path)
 
 The **live WebSocket loop talks to the device directly** — it instantiates `DeviceAcquisition` (serial)
-and falls back to `SimulatedAcquisition`. It does **not** go through any device-manager/mock abstraction.
+and requires it to work; it does **not** go through any device-manager/mock abstraction, and (as of
+2026-07-03) does **not** fall back to a simulator.
 
-- Real I8 hardware → `DeviceAcquisition` (serial @ 115200, 3 ch float32). See §2.2.
-- On real-device failure / no data in 2 s → `SimulatedAcquisition`. See §2.2.
+- Real I8 hardware → `DeviceAcquisition` (serial @ 115200, wire protocol still 3 ch float32, but only
+  CH1/column 0 is returned to the caller). See §2.2.
+- On real-device failure / no data in 2 s → the WS session sends a `{"type": "error", ...}` message
+  and aborts. See §2.2.
 
 `config.json` supplies the live loop's `device.serial_port` (used by `find_serial_port`). The `cfg`
 object (`signal_processing/config.py`) supplies `fs` and default band definitions used as a
@@ -433,7 +435,9 @@ resolution fallback in the protocol converter.
 2. Backend loads protocol M1 → `protocol_to_signal_processing_format` →
    `bands = { theta:(4,8), beta:(15,18) [helpers], theta_beta_ratio:{num:theta,den:beta} }`,
    `feature_modes = { theta_beta_ratio: "inhibit" }`, `selected_features = ["theta_beta_ratio"]`.
-3. `round_duration = 1500/5 = 300 s`. Device probe fails on a dev Mac → `SimulatedAcquisition(fs=250, 3ch)`.
+3. `round_duration = 1500/5 = 300 s`. Device probe requires the real I8 hardware connected — on a dev
+   machine with no device attached the probe fails and the session aborts with a WS error instead of
+   demoing on simulated data (no fallback as of 2026-07-03).
 4. Each second: read 250 samples → HP/LP/Notch filtfilt → `amp(4–8Hz)`, `amp(15–18Hz)` →
    `TBR = amp_theta / amp_beta`.
 5. First 30 s: collect TBR into baseline buffer. At 30 s: `baseline_mean = mean(buffer)`,
@@ -455,7 +459,7 @@ resolution fallback in the protocol converter.
 | 2 | **"z_score" is not a z-score** — `(value−threshold)/|threshold|`, no std | `sp_routes.py` | Misnamed; fine for mapping, but don't trust as statistical z |
 | 3 | **Live amplitude artifact gate = 500,000 µV** → effectively disabled | `sp_routes.py` | Amplitude artifacts only flagged via blink/EMG in practice |
 | 4 | **No CAR / referencing in live path** | `PlotterAlignedFilterChain` | Single-channel placements unaffected; multi-channel has no spatial filter |
-| 5 | **Real device hard-fixed to 3 channels**, extra channels are cycled/repeated | `device_acquisition.py` | "active_channel_count" defaults to 1 (CH1) unless a band names channels |
+| 5 | **Real device wire protocol still 3 floats/sample**, but only column 0 (CH1) is ever returned/processed — hardcoded, no channel selection logic remains | `device_acquisition.py`, `sp_routes.py` | `active_channel_count` is always `1`; protocol `channels` labels have no effect on which signal is read |
 | 6 | **WS loop persists no DB row** — the session row still comes entirely from frontend REST (the WS loop now writes the filtered-EEG CSV to disk, but never touches SQLAlchemy) | `sp_routes.py` (no db.add) | If the renderer crashes post-session, the session **row** is lost (the EEG CSV on disk survives) |
 | 7 | **Migrations re-inspect schema on every startup** (no versioning) | `app/core/migrations.py` (~994 lines) | Slow startup, hard to reason about; Alembic would help |
 | 8 | **LP cutoff really 40 Hz**, though `config.py` says bandpass `(0.5, 20)` | `preprocessing.py` | Config value is misleading; 40 Hz is intentional (needed for EMG detect) |
@@ -503,6 +507,42 @@ shown_threshold ← 0.1·threshold + 0.9·shown_threshold            # EMA α=0.
 
 ## 11. Changelog
 
+### 2026-07-03 — Single-channel (CH1) collapse, `fixed_threshold` default, `feedback_val` = all-or-nothing, no simulator fallback
+- **Channel collapse:** the app only ever needs one physical electrode. Removed all multi-channel
+  selection machinery instead of leaving it half-wired:
+  - `device_acquisition.py::DeviceAcquisition.read_samples()` returns only column 0 (CH1); the
+    dead "expand/cycle channels to fill `target_channels`" block is gone (wire protocol still
+    reads 3 floats/sample — only the return value changed).
+  - `features.py::compute_features` no longer branches on a channel index; bands are plain
+    `(low, high)` tuples.
+  - `app/protocols/utils.py::protocol_to_signal_processing_format` and
+    `app/protocols/schemas.py::FrequencyBandConfig` no longer read/accept
+    `channel_indices`/`numerator_channel_index`/`denominator_channel_index`. Protocol `channels`
+    (e.g. `["Cz"]`) is kept as a pure electrode-placement label for the UI/reports — it was
+    already unreliable as a signal selector (only ratio bands ever got an index from the
+    frontend; regular bands silently fell back to averaging all 3 raw columns).
+  - Frontend: removed CH2/CH3 markup and multi-channel loops (`SessionRecordingPanel.js`),
+    stopped persisting channel-index fields (`ui-protocols.js`), simplified debug logging and the
+    hardcoded 3-channel bandpower formatting (`WebSocketManager.js`).
+- **Mapping default → `fixed_threshold`:** `WebSocketManager.js`/`SessionPreparationPanel.js`
+  previously defaulted `mapping: 'sigmoid'`; now default to `'fixed_threshold'` (binary per-feature
+  success, §2.7).
+- **`feedback_val` is now all-or-nothing:** previously `mean(per-feature success)` (partial credit,
+  continuous when >1 feature selected); now set equal to `epoch_binary` — `1.0` only if every
+  selected feature passes simultaneously, else `0.0` — so the per-second reward gauge always
+  matches the strict win condition already used for `overall_success_rate`. The now-unused
+  `feature_successes` list was removed from `sp_routes.py`.
+- **No simulator fallback:** the WS loop no longer falls back to `SimulatedAcquisition` on device
+  failure/silence — it sends a `{"type": "error", ...}` message and aborts the session instead. The
+  app is no longer demoable without real hardware attached. See §2.2, §7.
+- **Files:** `pyServer/signal_processing/device_acquisition.py`, `pyServer/signal_processing/sp_routes.py`,
+  `pyServer/signal_processing/features.py`, `pyServer/app/protocols/utils.py`,
+  `pyServer/app/protocols/schemas.py`, `pyServer/app/protocols/README.md`,
+  `frontend/src/renderer/js/core/ui/ui-protocols.js`,
+  `frontend/src/renderer/js/features/SessionRecordingPanel.js`,
+  `frontend/src/renderer/js/core/WebSocketManager.js`,
+  `frontend/src/renderer/js/features/SessionPreparationPanel.js`.
+
 ### 2026-07-01 — Filtered EEG now recorded to CSV + `raw_data_file` populated
 - **Was:** the running app never wrote raw/filtered EEG to disk. The `raw_data_file` /
   `processed_data_file` columns were **always NULL**; the only CSV was a frontend browser-download
@@ -515,9 +555,9 @@ shown_threshold ← 0.1·threshold + 0.9·shown_threshold            # EMA α=0.
   the recording is continuous with no duplicated samples. File:
   `<db-dir>/eeg_recordings/eeg_filtered_p<patient>_<timestamp>.csv`, columns
   `timestamp, sample_index, session_time_s, round, phase,` then a
-  `channel_<n>_raw_uv, channel_<n>_filtered_uv` pair **only for the channel(s) the protocol
-  works on** (`_active_indices`, i.e. channels named by the bands; defaults to **CH1** when no band
-  names one — the typical single-electrode case). `n` is the 1-based channel number. Opened before
+  `channel_<n>_raw_uv, channel_<n>_filtered_uv` pair — always just the single acquired channel
+  (**CH1**, `channel_indices = [0]`) as of the 2026-07-03 single-channel collapse. `n` is the
+  1-based channel number. Opened before
   the loop, flushed per epoch, closed in `finally`. The path is sent to the frontend on each
   `round_complete` (`raw_data_file`), which stores it via `updateSession` on completion.
 - **Download:** the recording is served for download by `GET /sp/recording/{filename}`
@@ -566,6 +606,9 @@ These files/symbols exist in `pyServer/` but are **never imported by `create_app
 They are standalone demos, tooling, or dormant helpers. Listed so future docs don't treat them as live.
 
 **Dormant / unused signal-processing modules**
+- `signal_processing/acquisition.py` (`SimulatedAcquisition`) — as of 2026-07-03 the live WS loop no
+  longer imports or falls back to this; a real-device failure now aborts the session with a WS error
+  instead. Still used by standalone scripts/tests.
 - `signal_processing/normalization.py` (`BaselineManager`, `AdaptiveThreshold`) — the live loop uses
   inline static thresholds, never these. Only imported by the standalone `main.py` / `main_device.py`.
 - `signal_processing/smoothing.py` (`EMA`) — the live loop's threshold smoothing is an inline EMA, not
@@ -582,9 +625,8 @@ They are standalone demos, tooling, or dormant helpers. Listed so future docs do
 
 **Device tooling cluster (not in the live WS path)**
 - `device_handlers/device_manager.py`, `device_handlers/mock_device.py`,
-  `device_handlers/eeg_data_collector.py`. The live loop talks to
-  `DeviceAcquisition`/`SimulatedAcquisition` directly. These serve the standalone collector/test
-  tooling only.
+  `device_handlers/eeg_data_collector.py`. The live loop talks to `DeviceAcquisition` directly (no
+  fallback). These serve the standalone collector/test tooling only.
 - Note: `config_loader.py` **is now in the live path** — `signal_processing/config.py` reads
   `collector.sampling_rate` from it (2026-07-01 fix). It is no longer tooling-only.
 

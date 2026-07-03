@@ -233,9 +233,7 @@ async def nfcore(websocket: WebSocket) -> None:
             # Only CH1 (index 0) is ever acquired/processed — see DATA-ACQUISITION.md.
             active_channel_count = 1
 
-            # Initialize device and send start command
-            # Try to use real device first, fall back to simulated if it fails
-            use_simulated = False
+            # Initialize device and send start command — real hardware only, no simulated fallback.
             try:
                 acq = DeviceAcquisition(fs=cfg.fs, verbose=True)
                 device_channels = acq.target_channels
@@ -245,27 +243,27 @@ async def nfcore(websocket: WebSocket) -> None:
                 if hasattr(acq, 'send_command'):
                     acq.send_command("Contl_STRT_AQU")
                     logger.info("Sent start acquisition command to device")
-                
+
                 # Test if device is actually sending data (wait up to 2 seconds)
                 logger.info("Testing device data acquisition...")
                 test_block = acq.read_samples(10, timeout=2.0)
                 if test_block is None or test_block.size == 0:
-                    logger.warning("Device not sending data, falling back to simulated acquisition")
-                    use_simulated = True
+                    logger.error("Device not sending data")
                     acq.stop()
-                    acq = None
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "EEG device not connected or not sending data",
+                        "time": datetime.now(timezone.utc).isoformat()
+                    })
+                    return
             except Exception as e:
-                logger.warning(f"Failed to initialize device: {e}. Falling back to simulated acquisition")
-                use_simulated = True
-                acq = None
-            
-            # Use simulated acquisition if device failed
-            if use_simulated or acq is None:
-                from signal_processing.acquisition import SimulatedAcquisition
-                logger.info("Using SimulatedAcquisition for testing/demo")
-                acq = SimulatedAcquisition(fs=cfg.fs, channels=1)
-                device_channels = 1
-                fs = cfg.fs
+                logger.error(f"Failed to initialize device: {e}")
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"Failed to initialize EEG device: {e}",
+                    "time": datetime.now(timezone.utc).isoformat()
+                })
+                return
 
             # Setup processing parameters
             epoch_seconds = 1.0  # 1 second processing window
