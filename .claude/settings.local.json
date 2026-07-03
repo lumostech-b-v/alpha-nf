@@ -51,7 +51,9 @@
       "Bash(break)",
       "Bash(ls .venv/bin/uvicorn)",
       "Bash(.venv/bin/uvicorn app.core.main:app *)",
-      "Bash(xargs -n1 basename)"
+      "Bash(xargs -n1 basename)",
+      "Bash(git -C /Users/farhadfirozitabar/Documents/Clients/Alpha/neuro-feedback log --oneline -5 -- frontend/package.json frontend/package-lock.json)",
+      "Bash(git *)"
     ]
   }
 }
