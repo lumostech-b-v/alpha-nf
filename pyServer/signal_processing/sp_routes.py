@@ -230,28 +230,14 @@ async def nfcore(websocket: WebSocket) -> None:
             logger.info(f"Selected features: {selected_features}")
             logger.info(f"Available bands: {list(bands.keys())}")
 
-            # Compute which channel indices are explicitly referenced by the protocol bands.
-            # If no band specifies a channel, all DSP runs on whatever channels are acquired;
-            # in that case we default to showing just CH1 (index 0) since the typical
-            # single-electrode placement only produces signal there.
-            _active_indices: set = set()
-            for _band_cfg in bands.values():
-                if isinstance(_band_cfg, tuple) and len(_band_cfg) == 3:
-                    _active_indices.add(int(_band_cfg[2]))
-                elif isinstance(_band_cfg, dict):
-                    for _key in ("channel_indices", "numerator_channel_index", "denominator_channel_index"):
-                        _val = _band_cfg.get(_key)
-                        if isinstance(_val, list):
-                            _active_indices.update(int(x) for x in _val)
-                        elif isinstance(_val, int):
-                            _active_indices.add(_val)
-            active_channel_count = len(_active_indices) if _active_indices else 1
+            # Only CH1 (index 0) is ever acquired/processed — see DATA-ACQUISITION.md.
+            active_channel_count = 1
 
             # Initialize device and send start command
             # Try to use real device first, fall back to simulated if it fails
             use_simulated = False
             try:
-                acq = DeviceAcquisition(target_channels=3, fs=cfg.fs, verbose=True)
+                acq = DeviceAcquisition(fs=cfg.fs, verbose=True)
                 device_channels = acq.target_channels
                 fs = acq.fs
 
@@ -277,8 +263,8 @@ async def nfcore(websocket: WebSocket) -> None:
             if use_simulated or acq is None:
                 from signal_processing.acquisition import SimulatedAcquisition
                 logger.info("Using SimulatedAcquisition for testing/demo")
-                acq = SimulatedAcquisition(fs=cfg.fs, channels=3)
-                device_channels = 3
+                acq = SimulatedAcquisition(fs=cfg.fs, channels=1)
+                device_channels = 1
                 fs = cfg.fs
 
             # Setup processing parameters
@@ -292,13 +278,8 @@ async def nfcore(websocket: WebSocket) -> None:
 
             buffer = np.zeros((0, device_channels), dtype=np.float64)
 
-            # Record the filtered EEG signal (post notch+bandpass) to a CSV on disk,
-            # but only for the channels the protocol actually works on (defaults to
-            # CH1 when no band names a channel — the typical single-electrode case).
-            eeg_csv_channel_indices = sorted(_active_indices) if _active_indices else [0]
-            eeg_csv_channel_indices = [i for i in eeg_csv_channel_indices if 0 <= i < device_channels]
-            if not eeg_csv_channel_indices:
-                eeg_csv_channel_indices = [0]
+            # Record the filtered EEG signal (post notch+bandpass) to a CSV on disk — CH1 only.
+            eeg_csv_channel_indices = [0]
             eeg_csv_file, eeg_csv_writer, eeg_csv_path = _open_filtered_eeg_csv(
                 patient_id, eeg_csv_channel_indices
             )
@@ -508,7 +489,7 @@ async def nfcore(websocket: WebSocket) -> None:
                     x_clean = filter_chain.process(buffer)
 
                     # Prepare visualization data scaled to microvolts for frontend plots
-                    num_channels_to_send = min(3, x_clean.shape[1])
+                    num_channels_to_send = x_clean.shape[1]
                     samples_to_send = min(200, x_clean.shape[0])
                     x_clean_visual = x_clean * VISUALIZATION_SCALE
                     if samples_to_send > 0 and num_channels_to_send > 0:
@@ -526,7 +507,7 @@ async def nfcore(websocket: WebSocket) -> None:
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                             "eeg_data": {
                                 "channels": eeg_visualization_data,
-                                "channel_names": ["Channel 1", "Channel 2", "Channel 3"],
+                                "channel_names": ["CH1"],
                                 "active_channel_count": active_channel_count,
                                 "sampling_rate": int(fs),
                                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -535,8 +516,8 @@ async def nfcore(websocket: WebSocket) -> None:
                                     "max": VISUALIZATION_Y_LIMITS[1]
                                 },
                                 "signal_stats": {
-                                    "mean_values": [float(np.nanmean(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(min(x_clean_visual.shape[1], 3))],
-                                    "std_values": [float(np.nanstd(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(min(x_clean_visual.shape[1], 3))],
+                                    "mean_values": [float(np.nanmean(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(x_clean_visual.shape[1])],
+                                    "std_values": [float(np.nanstd(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(x_clean_visual.shape[1])],
                                     "min_values": [float(np.nanmin(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(min(x_clean_visual.shape[1], 3))],
                                     "max_values": [float(np.nanmax(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(min(x_clean_visual.shape[1], 3))]
                                 }
@@ -899,7 +880,7 @@ async def nfcore(websocket: WebSocket) -> None:
                             "signal_info": {
                                 "raw_data_shape": [int(buffer.shape[0]), int(buffer.shape[1])] if buffer.size > 0 else [0, 0],
                                 "processed_data_shape": [int(x_clean.shape[0]), int(x_clean.shape[1])] if x_clean.size > 0 else [0, 0],
-                                "channel_names": ["C3", "Cz", "C4"][:device_channels],  # Use actual device channel count
+                                "channel_names": ["CH1"],
                                 "active_channel_count": active_channel_count,
                                 "sampling_rate": int(fs),
                                 "epoch_samples": int(epoch_samples),
@@ -953,8 +934,8 @@ async def nfcore(websocket: WebSocket) -> None:
                                 "max": VISUALIZATION_Y_LIMITS[1]
                             },
                             "signal_stats": {
-                                "mean_values": [float(np.nanmean(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(min(x_clean_visual.shape[1], 5))],
-                                "std_values": [float(np.nanstd(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(min(x_clean_visual.shape[1], 5))],
+                                "mean_values": [float(np.nanmean(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(x_clean_visual.shape[1])],
+                                "std_values": [float(np.nanstd(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(x_clean_visual.shape[1])],
                                 "min_values": [float(np.nanmin(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(min(x_clean_visual.shape[1], 5))],
                                 "max_values": [float(np.nanmax(x_clean_visual[:, ch_idx])) if x_clean_visual.shape[0] > 0 else 0.0 for ch_idx in range(min(x_clean_visual.shape[1], 5))]
                             }

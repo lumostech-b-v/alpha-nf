@@ -50,7 +50,8 @@
       "Bash(command -v npm)",
       "Bash(break)",
       "Bash(ls .venv/bin/uvicorn)",
-      "Bash(.venv/bin/uvicorn app.core.main:app *)"
+      "Bash(.venv/bin/uvicorn app.core.main:app *)",
+      "Bash(xargs -n1 basename)"
     ]
   }
 }

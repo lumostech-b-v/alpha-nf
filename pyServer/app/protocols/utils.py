@@ -45,11 +45,11 @@ def protocol_to_signal_processing_format(protocol: models.ProtocolLibrary) -> Di
     Convert a protocol from the database to the format expected by signal processing.
 
     Returns a dict with:
-    - bands: {band_name: (low_freq, high_freq, channel_index) or
-              {"numerator": band_name, "denominator": band_name, "numerator_channel": channel_idx, "denominator_channel": channel_idx} or
-              {"numerator": band_name, "denominator": band_name}}
+    - bands: {band_name: (low_freq, high_freq)} or
+              {"numerator": band_name, "denominator": band_name}
     - feature_modes: {band_name: "enhance" | "inhibit"}
-    - channels: List of channel names used in this protocol
+    - channels: descriptive electrode-placement labels only (e.g. "Cz") — not used to select
+      a signal column; the live DSP always operates on the single acquired channel (CH1).
     - feature_weights: {band_name: weight} (default 1.0)
     """
     if not protocol.features or "frequency_bands" not in protocol.features:
@@ -88,18 +88,11 @@ def protocol_to_signal_processing_format(protocol: models.ProtocolLibrary) -> Di
 
         # Extract frequency range if it exists
         freq_range = band_config.get("frequency_range", [])
-        channel_indices = band_config.get("channel_indices", [])
 
         if len(freq_range) != 2:
             raise ValueError(f"Invalid frequency_range for band {idx} in protocol {protocol.id}")
-        
-        # If a specific channel index is provided (first one in the list), include it in the tuple
-        if channel_indices:
-            # Use the first channel index if multiple are provided
-            channel_idx = channel_indices[0] if isinstance(channel_indices, list) and channel_indices else channel_indices
-            bands[band_name] = (float(freq_range[0]), float(freq_range[1]), channel_idx)
-        else:
-            bands[band_name] = (float(freq_range[0]), float(freq_range[1]))
+
+        bands[band_name] = (float(freq_range[0]), float(freq_range[1]))
 
         # Set mode: "enhance" for reward, "inhibit" for inhibit
         if band_config.get("type") == "reward":
@@ -131,7 +124,7 @@ def protocol_to_signal_processing_format(protocol: models.ProtocolLibrary) -> Di
         if not numerator_band or not denominator_band:
             raise ValueError(f"Ratio feature missing numerator or denominator in protocol {protocol.id}")
 
-        def _resolve_sub_band(band_name: str, explicit_range, channel_idx):
+        def _resolve_sub_band(band_name: str, explicit_range):
             """Add a sub-band to bands dict, resolving from cfg or an explicit range."""
             if band_name in bands:
                 return
@@ -154,41 +147,22 @@ def protocol_to_signal_processing_format(protocol: models.ProtocolLibrary) -> Di
                     f"Band '{band_name}' not found in default bands and no explicit range provided "
                     f"for protocol {protocol.id}. Available bands: {list(cfg.bands.keys())}"
                 )
-            if channel_idx is not None:
-                bands[band_name] = (freq_range[0], freq_range[1], channel_idx)
-            else:
-                bands[band_name] = (freq_range[0], freq_range[1])
+            bands[band_name] = (freq_range[0], freq_range[1])
             feature_modes[band_name] = "enhance"
             feature_weights[band_name] = 1.0
             helper_bands.add(band_name)
 
-        _resolve_sub_band(
-            numerator_band,
-            band_config.get("numerator_range"),
-            band_config.get("numerator_channel_index"),
-        )
-        _resolve_sub_band(
-            denominator_band,
-            band_config.get("denominator_range"),
-            band_config.get("denominator_channel_index"),
-        )
+        _resolve_sub_band(numerator_band, band_config.get("numerator_range"))
+        _resolve_sub_band(denominator_band, band_config.get("denominator_range"))
 
         # Generate a proper band name, using the provided name or creating one based on the numerator and denominator
         band_name = band_config.get("name") or f"ratio_{numerator_band}_over_{denominator_band}_{idx}"
 
         # Add the ratio configuration to bands
-        ratio_config = {
+        bands[band_name] = {
             "numerator": numerator_band,
             "denominator": denominator_band
         }
-
-        # Add channel information if specified
-        if band_config.get("numerator_channel_index") is not None:
-            ratio_config["numerator_channel"] = band_config.get("numerator_channel_index")
-        if band_config.get("denominator_channel_index") is not None:
-            ratio_config["denominator_channel"] = band_config.get("denominator_channel_index")
-
-        bands[band_name] = ratio_config
 
         # Set mode for the ratio feature (default to "enhance")
         band_type = band_config.get("mode", "enhance")  # "enhance" or "inhibit"

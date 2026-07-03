@@ -156,24 +156,12 @@ class SessionRecordingPanel {
               <h3>EEG Signal</h3>
               <div class="nf-channel-indicators">
                 <span class="nf-channel-badge ch1" id="channel1Status">CH1</span>
-                <span class="nf-channel-badge ch2" id="channel2Status" style="display:none">CH2</span>
-                <span class="nf-channel-badge ch3" id="channel3Status" style="display:none">CH3</span>
               </div>
             </div>
             <div class="nf-eeg-grid" style="grid-template-columns: repeat(1, 1fr)">
               <div class="nf-eeg-channel">
                 <div class="nf-eeg-plot" id="plotChannel1">
                   <div class="nf-eeg-label">CH1</div>
-                </div>
-              </div>
-              <div class="nf-eeg-channel" style="display:none">
-                <div class="nf-eeg-plot" id="plotChannel2">
-                  <div class="nf-eeg-label">CH2</div>
-                </div>
-              </div>
-              <div class="nf-eeg-channel" style="display:none">
-                <div class="nf-eeg-plot" id="plotChannel3">
-                  <div class="nf-eeg-label">CH3</div>
                 </div>
               </div>
             </div>
@@ -203,8 +191,6 @@ class SessionRecordingPanel {
       panel = document.getElementById("sessionRecordingPanel");
       if (typeof lucide !== "undefined" && lucide.createIcons) lucide.createIcons();
       this.initializeEventListeners();
-      // Fresh DOM — reset so setActiveChannelCount doesn't skip on its first call
-      this._activeChannelCount = undefined;
     } else {
       // Panel already exists, make sure it's visible
       panel.style.display = "block";
@@ -318,11 +304,9 @@ class SessionRecordingPanel {
   }
   
   createSimpleEEGPlots() {
-    const channels = ['Channel1', 'Channel2', 'Channel3'];
+    const channels = ['Channel1'];
     const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
-    const channelColors = isDark
-      ? ['#60a5fa', '#4ade80', '#fb923c']
-      : ['#2563eb', '#16a34a', '#ea580c'];
+    const channelColors = isDark ? ['#60a5fa'] : ['#2563eb'];
 
     if (!this.plotData) this.plotData = {};
     if (!this._resizeObservers) this._resizeObservers = {};
@@ -413,23 +397,6 @@ class SessionRecordingPanel {
     }
   }
   
-  setActiveChannelCount(count) {
-    const n = Math.min(Math.max(1, count || 1), 3);
-    if (this._activeChannelCount === n) return;
-    this._activeChannelCount = n;
-
-    for (let i = 0; i < 3; i++) {
-      const wrapper = document.getElementById(`plotChannel${i + 1}`)?.closest('.nf-eeg-channel');
-      const badge = document.getElementById(`channel${i + 1}Status`);
-      const visible = i < n;
-      if (wrapper) wrapper.style.display = visible ? '' : 'none';
-      if (badge) badge.style.display = visible ? '' : 'none';
-    }
-
-    const grid = document.querySelector('.nf-eeg-grid');
-    if (grid) grid.style.gridTemplateColumns = `repeat(${n}, 1fr)`;
-  }
-
   updateEEGPlot(channelData) {
     if (!channelData) {
       console.warn('[SessionRecordingPanel] No channel data provided to updateEEGPlot');
@@ -468,15 +435,12 @@ class SessionRecordingPanel {
     const samplesToShow = sampleRate * 2;
     
     // channelData should be an array where each element is an array of values for one channel
-    // Format: [[ch1_val1, ch1_val2, ...], [ch2_val1, ch2_val2, ...], [ch3_val1, ch3_val2, ...]]
-    // Only plot the first 3 channels (Channel 1, 2, 3) to match realtime_plotter_mac.py
-    const channels = ['Channel1', 'Channel2', 'Channel3'];
-    const maxChannels = 3; // Only process first 3 channels
-    
+    // Format: [[ch1_val1, ch1_val2, ...]] — always a single channel (CH1)
+    const channels = ['Channel1'];
+
     console.log('[SessionRecordingPanel] Updating EEG plots, channelData length:', channelData.length, 'first channel samples:', channelData[0]?.length);
-    
-    // Only process the first 3 channels (indices 0, 1, 2)
-    for (let chIdx = 0; chIdx < Math.min(channelData.length, maxChannels); chIdx++) {
+
+    for (let chIdx = 0; chIdx < Math.min(channelData.length, channels.length); chIdx++) {
       const channelName = channels[chIdx];
       const channelValues = channelData[chIdx];
       

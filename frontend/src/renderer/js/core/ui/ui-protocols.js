@@ -496,11 +496,6 @@
             let selectedChannel = '';
             if (band.channels && band.channels.length > 0) {
                 selectedChannel = band.channels[0];
-            } else if (band.numerator_channel_index !== undefined) {
-                const channelIndex = band.numerator_channel_index;
-                if (channelIndex >= 0 && channelIndex < ALL_CHANNELS.length) {
-                    selectedChannel = ALL_CHANNELS[channelIndex];
-                }
             }
 
             const allBandNames = [...PREDEFINED_BANDS.map(b => b.name)];
@@ -776,9 +771,7 @@
                 numerator: '',
                 denominator: '',
                 mode: 'enhance',
-                channels: [],
-                numerator_channel_index: undefined,
-                denominator_channel_index: undefined
+                channels: []
             }, newIndex, getAvailableBandNames());
             
             ratioList.insertAdjacentHTML('beforeend', newRatioHTML);
@@ -969,12 +962,11 @@
             return null;
         }
         
-        // Get channel index for backend compatibility
-        const channelIndex = ALL_CHANNELS.indexOf(channel);
-        if (channelIndex === -1) {
+        // Validate the channel is a recognized placement label
+        if (!ALL_CHANNELS.includes(channel)) {
             return null;
         }
-        
+
         // Auto-generate name if not provided
         let name = nameInput?.value?.trim();
         if (!name) {
@@ -991,8 +983,6 @@
             name: name,
             mode: mode,
             channels: [channel],
-            numerator_channel_index: channelIndex,
-            denominator_channel_index: channelIndex,
             ...(numData.min != null && numData.max != null ? { numerator_range: [numData.min, numData.max] } : {}),
             ...(denData.min != null && denData.max != null ? { denominator_range: [denData.min, denData.max] } : {}),
         };

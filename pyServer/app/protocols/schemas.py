@@ -7,15 +7,12 @@ class FrequencyBandConfig(BaseModel):
     # Regular band fields
     frequency: Optional[float] = None  # The frequency number itself (e.g., 10.0 for 10 Hz)
     frequency_range: Optional[List[float]] = None  # [min, max] frequency range (e.g., [8.0, 12.0])
-    channels: Optional[List[str]] = []  # List of channel names (e.g., ["F3", "F4"])
-    channel_indices: Optional[List[int]] = []  # List of channel indices (e.g., [0, 1, 2] for channels 1, 2, 3)
+    channels: Optional[List[str]] = []  # Electrode placement labels only (e.g., ["Cz"]) — not a signal selector; the live DSP always uses the single acquired channel (CH1)
     type: str  # Either "reward", "inhibit", or "ratio"
 
     # Ratio-specific fields
     numerator: Optional[str] = None  # Name of the numerator feature for ratio type
     denominator: Optional[str] = None  # Name of the denominator feature for ratio type
-    numerator_channel_index: Optional[int] = None  # Specific channel index for numerator
-    denominator_channel_index: Optional[int] = None  # Specific channel index for denominator
     name: Optional[str] = None  # Name for the ratio feature
     mode: Optional[str] = None  # "enhance" or "inhibit" for ratio type - whether to increase or decrease the ratio value
 

@@ -9,7 +9,7 @@ A comprehensive protocol library system for neurofeedback applications. Each use
 - **Patient-Specific**: Each patient has their own protocol library
 - **NF-Core Compatible**: Features designed for signal processing pipeline integration
 - **Advanced Protocol Types**: Support for standard, ratio, and other specialized protocols
-- **Channel-Specific Processing**: Ability to specify different EEG channels for different features
+- **Channel labels**: `channels` on a band is an electrode-placement label only (e.g. where "Cz" sits on the head) — the live DSP always processes the single acquired channel (CH1), so `channels` has no effect on which signal a band reads
 
 ## API Endpoints & Examples
 
@@ -39,7 +39,6 @@ Authorization: Bearer <token>
         "type": "reward",
         "frequency_range": [8.0, 12.0],
         "channels": ["Cz"],
-        "channel_indices": [2],
         "weight": 1.0
       }
     ],
@@ -66,16 +65,13 @@ Authorization: Bearer <token>
         "numerator": "theta",
         "denominator": "beta",
         "mode": "inhibit",
-        "channels": ["Cz"],
-        "numerator_channel_index": 1,
-        "denominator_channel_index": 2
+        "channels": ["Cz"]
       },
       {
         "type": "inhibit",
         "name": "theta",
         "frequency_range": [4.0, 8.0],
         "channels": ["Cz"],
-        "channel_indices": [1],
         "weight": 1.0
       },
       {
@@ -83,7 +79,6 @@ Authorization: Bearer <token>
         "name": "beta",
         "frequency_range": [13.0, 30.0],
         "channels": ["Cz"],
-        "channel_indices": [2],
         "weight": 1.0
       }
     ],
@@ -120,7 +115,6 @@ Authorization: Bearer <token>
         "type": "reward",
         "frequency_range": [8.0, 12.0],
         "channels": ["Cz"],
-        "channel_indices": [0],
         "weight": 1.5
       }
     ],
@@ -153,12 +147,10 @@ Authorization: Bearer <token>
 ### Standard Protocols (`protocol_type: "standard"`)
 - Traditional neurofeedback protocols with individual frequency bands
 - Bands can be "reward" (enhance) or "inhibit" modes
-- Supports channel-specific processing with `channel_indices`
 
 ### Ratio Protocols (`protocol_type: "ratio"`)
 - Specialized protocols that compute ratios between frequency bands
 - Ratio bands defined with `type: "ratio"`, `numerator`, and `denominator`
-- Supports channel-specific numerator and denominator with `numerator_channel_index` and `denominator_channel_index`
 
 ## Protocol Features Schema
 
@@ -171,7 +163,6 @@ Authorization: Bearer <token>
         "type": "reward|inhibit",
         "frequency_range": [min_freq, max_freq],
         "channels": ["channel_name"],
-        "channel_indices": [0, 1, 2],  // Optional: specify channel indices
         "weight": 1.0,
         "name": "optional_name"
       }
@@ -193,16 +184,13 @@ Authorization: Bearer <token>
         "numerator": "numerator_feature_name",  // References another band name
         "denominator": "denominator_feature_name",  // References another band name
         "mode": "enhance|inhibit",  // How to respond to this ratio value
-        "channels": ["channel_name"],
-        "numerator_channel_index": 1,  // Optional: specific channel for numerator
-        "denominator_channel_index": 2  // Optional: specific channel for denominator
+        "channels": ["channel_name"]
       },
       {
         "type": "reward|inhibit",
         "name": "numerator_feature_name",  // Must match numerator reference above
         "frequency_range": [min_freq, max_freq],
         "channels": ["channel_name"],
-        "channel_indices": [numerator_channel_index],  // Same as numerator_channel_index
         "weight": 1.0
       },
       {
@@ -210,7 +198,6 @@ Authorization: Bearer <token>
         "name": "denominator_feature_name",  // Must match denominator reference above
         "frequency_range": [min_freq, max_freq],
         "channels": ["channel_name"],
-        "channel_indices": [denominator_channel_index],  // Same as denominator_channel_index
         "weight": 1.0
       }
     ],
@@ -220,11 +207,11 @@ Authorization: Bearer <token>
 }
 ```
 
-### Channel-Specific Processing
-- Individual frequency bands can specify channel indices with `channel_indices`
-- Ratio features can specify different channels for numerator and denominator
-- When channel indices are specified, features are computed from specific EEG channels
-- If no channel index is specified, features are computed from all available channels
+### Channel labels
+- `channels` on a band (e.g. `["Cz"]`) is a placement label describing where the single physical
+  electrode sits on the head — it is metadata for the UI/reports only
+- It does not select a signal column: the live DSP always processes the one channel actually
+  acquired (CH1)
 
 ## Example Protocol Types
 
@@ -238,7 +225,6 @@ Authorization: Bearer <token>
         "type": "reward",
         "frequency_range": [8.0, 12.0],
         "channels": ["Cz"],
-        "channel_indices": [2],
         "weight": 1.0
       }
     ],
@@ -260,23 +246,19 @@ Authorization: Bearer <token>
         "numerator": "theta",
         "denominator": "beta",
         "mode": "inhibit",
-        "channels": ["Cz"],
-        "numerator_channel_index": 1,
-        "denominator_channel_index": 2
+        "channels": ["Cz"]
       },
       {
         "type": "inhibit",
         "name": "theta",
         "frequency_range": [4.0, 8.0],
-        "channels": ["Cz"],
-        "channel_indices": [1]
+        "channels": ["Cz"]
       },
       {
         "type": "reward",
         "name": "beta",
         "frequency_range": [13.0, 30.0],
-        "channels": ["Cz"],
-        "channel_indices": [2]
+        "channels": ["Cz"]
       }
     ],
     "protocol_type": "ratio",
@@ -285,24 +267,26 @@ Authorization: Bearer <token>
 }
 ```
 
-### 3. Multi-Channel Protocol
+### 3. Multiple Bands, One Physical Channel
+Multiple bands in the same protocol can each carry a different placement label (e.g. one band
+labeled `["F3"]`, another `["Cz"]`) — this is only documentation of where the clinician placed the
+single electrode for that recording, not a routing instruction. All bands are computed from the
+same acquired signal (CH1):
 ```json
 {
-  "name": "Multi-Channel Training",
+  "name": "Frontal + Midline Training",
   "features": {
     "frequency_bands": [
       {
         "type": "reward",
         "frequency_range": [8.0, 12.0],
-        "channels": ["F3", "F4"],
-        "channel_indices": [0, 1],
+        "channels": ["F3"],
         "weight": 1.5
       },
       {
         "type": "inhibit",
         "frequency_range": [1.0, 4.0],
         "channels": ["Cz"],
-        "channel_indices": [2],
         "weight": 1.0
       }
     ],
@@ -326,7 +310,6 @@ Authorization: Bearer <token>
         "type": "reward",
         "frequency_range": [8.0, 12.0],
         "channels": ["Cz"],
-        "channel_indices": [2],
         "weight": 1.0
       }
     ],
@@ -355,16 +338,13 @@ Authorization: Bearer <token>
         "numerator": "theta",
         "denominator": "beta",
         "mode": "inhibit",
-        "channels": ["Cz"],
-        "numerator_channel_index": 1,
-        "denominator_channel_index": 2
+        "channels": ["Cz"]
       },
       {
         "type": "inhibit",
         "name": "theta",
         "frequency_range": [4.0, 8.0],
         "channels": ["Cz"],
-        "channel_indices": [1],
         "weight": 1.0
       },
       {
@@ -372,7 +352,6 @@ Authorization: Bearer <token>
         "name": "beta",
         "frequency_range": [13.0, 30.0],
         "channels": ["Cz"],
-        "channel_indices": [2],
         "weight": 1.0
       }
     ],
@@ -415,13 +394,12 @@ Authorization: Bearer <token>
 ### Creating Standard Protocols:
 - Set `features.protocol_type` to "standard"
 - Define frequency bands with `type: "reward"` or `type: "inhibit"`
-- Optionally specify channel indices with `channel_indices`
+- Optionally set `channels` as a placement label (e.g. `["Cz"]`) for display/reports
 
 ### Creating Ratio Protocols:
 - Set `features.protocol_type` to "ratio"
 - Define a ratio band with `type: "ratio"`, `numerator`, `denominator`, and `mode`
 - Define the referenced numerator and denominator bands with proper names
-- Optionally specify channel indices for numerator and denominator separately
 
 ## Default Protocols
 
@@ -431,7 +409,7 @@ Authorization: Bearer <token>
 
 3. **P3 — SMR-Stability** - Improve sleep, reduce tension, aid resilience. Use: sleep_deficit↑, Severe Insomnia, psychomotor restlessness. Site: C4 (alt: Cz). Reward: 12–15 Hz. Inhibit: 2–7 Hz, 20–30 Hz.
 
-4. **Theta/Beta Ratio Training** - Training to reduce theta/beta ratio, commonly used for ADHD protocols. This computes the ratio of theta power to beta power and aims to decrease this ratio using specific channels.
+4. **Theta/Beta Ratio Training** - Training to reduce theta/beta ratio, commonly used for ADHD protocols. This computes the ratio of theta power to beta power and aims to decrease this ratio.
 
 ## Security Notes
 
@@ -443,6 +421,6 @@ Authorization: Bearer <token>
 ## Development Notes
 
 - When creating ratio protocols, ensure referenced numerator/denominator bands exist
-- Channel indices are 0-based (0 for first channel, 1 for second, etc.)
+- `channels` is a placement label only — the processing pipeline always reads the single acquired channel (CH1) regardless of what's set there
 - The processing pipeline automatically handles both standard and ratio protocols
 - Both static and adaptive thresholds work with ratio protocols

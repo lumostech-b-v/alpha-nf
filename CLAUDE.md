@@ -76,16 +76,24 @@ Despite React/Vite/Mantine entries in `package.json`, the live renderer is **pla
 `app/core/database.py` resolves a SQLite path (`app.db`) based on frozen-vs-script execution and OS user-data dirs; override with the `DATABASE_URL` env var. On startup the lifespan handler runs `Base.metadata.create_all` **and then a hand-rolled migration system** in `app/core/migrations.py` (raw SQL that detects old vs new schema, e.g. the plans/checkpoints → patient/blocks restructure). When you change a model, add the corresponding migration logic there — there are no migration version files.
 
 ### Real-time signal-processing pipeline
-The core neurofeedback loop is a **WebSocket** at `/sp/nfcore_start` (`signal_processing/sp_routes.py`), with `/sp/device/status` and `POST /sp/nfcore_stop` alongside. The DSP stages are separate composable modules: `acquisition` → `preprocessing` (referencing, notch/bandpass, real-time filter) → `artifact` (detection) → `features` → `normalization` (baseline + z-score) → `smoothing` (EMA) → `feedback` (feature→feedback mapping). `live_pipeline.py` / `device_acquisition.py` wire these against the device.
+The core neurofeedback loop is a single long-lived **WebSocket** coroutine at `/sp/nfcore_start` (`signal_processing/sp_routes.py`, ~950 lines), with `GET /sp/device/status` and `POST /sp/nfcore_stop` alongside. It directly orchestrates everything — transport, the round/baseline state machine, DSP, and payload building — there is no separate pipeline module wiring stages together despite the package layout implying one. Full reference: `pyServer/DATA-ACQUISITION.md` (walkthrough with code) and `BACKEND_MASTER_DOC.md` (complete spec: every formula, message type, and gotcha).
 
-### Device modes (`device_handlers/` + `config.json`)
-`device_manager.py` reads `device.mode` from `config.json` (`Auto` | `real` | `demo`). `Auto`/`real` try to load the real I8 hardware via `pythonnet` + `I8Library1.dll`; on failure (or `demo`) it falls back to `mock_device.py`, which synthesizes EEG. `config.json` also defines mock channel/sampling params and the collector's channel labels — this is the single source of truth for device behavior. Override sensitive values via env vars; never commit PHI or `app.db`.
+Per ~1s epoch (250 samples at `cfg.fs`, sourced from `config.json`'s `collector.sampling_rate`): read from the acquisition source → `PlotterAlignedFilterChain` (`preprocessing.py`; HP 0.5 Hz → LP 40 Hz → 50 Hz notch, all `filtfilt`, zero-phase, stateless per epoch — no CAR) → Welch band power → amplitude (µV) via `features.py` → first 30s of each round accumulates a per-feature baseline, then locks a static threshold at `baseline_mean × (1 ± pct)` → per-feature success via `sigmoid_map`/`linear_map`/fixed-threshold (`feedback.py`) → streamed to the renderer. Artifact checks (`artifact.py`: amplitude/blink/EMG) are informational only and never gate an epoch.
+
+**The WebSocket loop does not write to the database.** It streams live values and (as of 2026-07-01) writes a filtered-EEG CSV to disk; persisting the finished session row is done by the **frontend**, which POSTs to `/sessions` after the session ends.
+
+Several modules under `signal_processing/` (`normalization.py`, `smoothing.py`, `live_pipeline.py` (empty), `main.py`, `main_device.py`) and most of `preprocessing.py`'s functions (`RealTimeFilter`, `common_average_reference`, etc.) are **not used by the live loop** — it only imports `PlotterAlignedFilterChain` from `preprocessing.py`, plus `compute_features`, `sigmoid_map`/`linear_map`, and the artifact detectors. Don't assume a symbol is live just because it lives in a "live-looking" module — check the master doc's import graph first.
+
+### Device acquisition (live path) vs. device tooling
+The live WS loop talks to the device **directly** via `signal_processing/device_acquisition.py::DeviceAcquisition` — a plain serial connection (115200 baud, port from `config.json`'s `device.serial_port` or auto-detected, fixed 3-channel wire protocol of little-endian float32 triples) — and falls back to `signal_processing/acquisition.py::SimulatedAcquisition` if the real device is absent or silent for 2s. This fallback is why the app is always demoable without hardware.
+
+`device_handlers/` (`device_manager.py` + `I8Library1.dll` via `pythonnet`, `mock_device.py`, `eeg_data_collector.py`) is a **separate, dormant code path** — it's real, working code, but only reachable from the standalone `eeg_data_collector.py` CSV-dumping script, never from `sp_routes.py`. Changing `device.mode`/DLL settings in `config.json` has no effect on the live session; only `device.serial_port` and `collector.sampling_rate` matter there. `config.json` also defines mock channel/sampling params and channel labels. Override sensitive values via env vars; never commit PHI or `app.db`.
 
 ### Auth
 JWT via `app/core/auth.py`. `SECRET_KEY` comes from `JWT_SECRET_KEY` (defaults to an insecure dev value — must be set in production). `get_current_user` / `get_current_user_optional` are the FastAPI dependencies.
 
 ### Protocols
-`protocols/*.json` at repo root are the protocol definitions (adhd, anxiety, depression, theta_beta_ratio, etc.); `initialize_protocols.py` loads them into the DB.
+`protocols/*.json` at repo root are the protocol definitions (adhd, anxiety, depression, theta_beta_ratio, etc.); `initialize_protocols.py` loads them into the DB (table `protocol_library`, `features` column is JSON, user-owned not patient-specific; `sync_all_default_protocols` refreshes defaults for all users on startup). `app/protocols/utils.py::protocol_to_signal_processing_format` converts a protocol's `frequency_bands` (regular reward/inhibit bands, or `type: "ratio"` bands like theta/beta ratio) into the `bands`/`feature_modes`/`feature_weights`/`selected_features` shape the WS loop consumes directly — this is the seam between "protocol authoring" and "live DSP."
 
 ## Conventions
 - **Python**: 4-space indent, explicit type hints, `snake_case` files; `ruff`/`black`/`isort` clean.
@@ -113,7 +121,7 @@ Quick wins:
 
 Structural:
 - **Unused framework deps:** `package.json` pulls React 19, Mantine, Radix, TanStack Query, and Vite, but the renderer is 100% vanilla DOM JS with no build step. Since electron-builder bundles `node_modules/**/*`, this bloats the installer. Either remove them or actually adopt a framework.
-- **WebSocket monolith:** `signal_processing/sp_routes.py` (~917 lines) mixes socket transport, the session/round state machine, DSP orchestration, and DB writes in one handler — extracting a `SessionRunner`/pipeline service would make it testable.
+- **WebSocket monolith:** `signal_processing/sp_routes.py` (~950 lines) mixes socket transport, the session/round state machine, and DSP orchestration in one handler (it does not do DB writes — see above) — extracting a `SessionRunner`/pipeline service would make it testable.
 - **Fragmented config:** three sources — `config.json` (+`config_loader.py`), `device_handlers/device_config.ini`, and `signal_processing/config.py`.
 - **God-files:** frontend feature panels run 1,000–1,800 lines (`SessionRecordingPanel.js` ~1,776, `TreatmentPlanManager.js` ~1,596, `SessionPlanningPanel.js` ~1,580) and `css/styles.css` is ~7,770 lines — the main maintainability bottleneck.
 - **Migrations:** `app/core/migrations.py` (~996 lines) is hand-rolled raw SQL with no versioning, re-inspecting the schema on every startup. Alembic would give ordered, reversible migrations.

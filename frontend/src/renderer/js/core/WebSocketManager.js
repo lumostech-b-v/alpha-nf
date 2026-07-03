@@ -242,25 +242,18 @@ class WebSocketManager {
     handleEEGData(data) {
         if (this.isPaused) return;
 
-        // Print filtered signal values for debugging
+        // Print filtered signal value (CH1 only) for debugging
         if (data.eeg_data && Array.isArray(data.eeg_data)) {
-            // If data.eeg_data is in [samples, channels] format (last sample for visualization)
-            if (data.eeg_data.length > 0 && Array.isArray(data.eeg_data[0]) && data.eeg_data[0].length >= 3) {
+            if (data.eeg_data.length > 0 && Array.isArray(data.eeg_data[0]) && data.eeg_data[0].length >= 1) {
                 const lastSample = data.eeg_data[data.eeg_data.length - 1];
-                if (lastSample && lastSample.length >= 3) {
-                    const [c1, c2, c3] = lastSample;
-                    console.log(`[FILTERED SIGNALS] C1: ${c1.toFixed(6)}, C2: ${c2.toFixed(6)}, C3: ${c3.toFixed(6)}`);
+                if (lastSample && lastSample.length >= 1) {
+                    console.log(`[FILTERED SIGNAL] CH1: ${lastSample[0].toFixed(6)}`);
                 }
             }
-        } else if (data.eeg_data && Array.isArray(data.eeg_data.channels) && data.eeg_data.channels.length >= 3) {
-            // If data.eeg_data has channels property
-            const c1 = Array.isArray(data.eeg_data.channels[0]) && data.eeg_data.channels[0].length > 0 ? 
+        } else if (data.eeg_data && Array.isArray(data.eeg_data.channels) && data.eeg_data.channels.length >= 1) {
+            const ch1 = Array.isArray(data.eeg_data.channels[0]) && data.eeg_data.channels[0].length > 0 ?
                 data.eeg_data.channels[0][data.eeg_data.channels[0].length - 1] : 0;
-            const c2 = Array.isArray(data.eeg_data.channels[1]) && data.eeg_data.channels[1].length > 0 ?
-                data.eeg_data.channels[1][data.eeg_data.channels[1].length - 1] : 0;
-            const c3 = Array.isArray(data.eeg_data.channels[2]) && data.eeg_data.channels[2].length > 0 ?
-                data.eeg_data.channels[2][data.eeg_data.channels[2].length - 1] : 0;
-            console.log(`[FILTERED SIGNALS] C1: ${c1.toFixed(6)}, C2: ${c2.toFixed(6)}, C3: ${c3.toFixed(6)}`);
+            console.log(`[FILTERED SIGNAL] CH1: ${ch1.toFixed(6)}`);
         }
 
         this.triggerCallbacks('onEEGData', data);
@@ -344,10 +337,6 @@ class WebSocketManager {
                 const firstChannelSamples = eegPlotData[0]?.length || 0;
                 const samplePreview = eegPlotData[0]?.slice(0, 3) || [];
                 console.log('[WebSocketManager] Calling updateEEGPlot with', eegPlotData.length, 'channels, first channel has', firstChannelSamples, 'samples, preview:', samplePreview.map(v => v.toFixed(3)));
-                const activeCount = data.eeg_data?.active_channel_count ?? 1;
-                if (typeof recordingPanel.setActiveChannelCount === 'function') {
-                    recordingPanel.setActiveChannelCount(activeCount);
-                }
                 try {
                     recordingPanel.updateEEGPlot(eegPlotData);
                 } catch (error) {
@@ -399,7 +388,7 @@ class WebSocketManager {
                 const bands = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
                 
                 // Create arrays to store bandpower values for each channel
-                const channelCount = 3; // Assuming 3 channels: C3, Cz, C4
+                const channelCount = 1; // Always a single channel (CH1)
                 const bandpowerChannels = [];
                 
                 // Initialize channel arrays
@@ -450,34 +439,24 @@ class WebSocketManager {
         if (data.eeg_data && data.eeg_data.channels) {
             console.log('[WebSocketManager] handleFeedback: Received eeg_data, channels length:', data.eeg_data.channels.length);
             
-            // Print filtered signal values for debugging
+            // Print filtered signal value (CH1 only) for debugging
             if (data.eeg_data.channels && Array.isArray(data.eeg_data.channels) && data.eeg_data.channels.length > 0) {
-                // If channels data is in [samples, channels] format (last 50 samples for visualization)
                 if (Array.isArray(data.eeg_data.channels[0])) {
                     const lastSample = data.eeg_data.channels[data.eeg_data.channels.length - 1];
-                    if (Array.isArray(lastSample) && lastSample.length >= 3) {
-                        const [c1, c2, c3] = lastSample;
-                        console.log(`[FILTERED SIGNALS] C1: ${c1.toFixed(6)}, C2: ${c2.toFixed(6)}, C3: ${c3.toFixed(6)}`);
+                    if (Array.isArray(lastSample) && lastSample.length >= 1) {
+                        console.log(`[FILTERED SIGNAL] CH1: ${lastSample[0].toFixed(6)}`);
                     }
-                }
-                // If channels data is in [channel1_samples, channel2_samples, channel3_samples] format
-                else if (Array.isArray(data.eeg_data.channels[0]) && Array.isArray(data.eeg_data.channels[0].samples)) {
-                    const c1 = data.eeg_data.channels[0].samples[data.eeg_data.channels[0].samples.length - 1];
-                    const c2 = data.eeg_data.channels[1]?.samples?.[data.eeg_data.channels[1]?.samples?.length - 1] || 0;
-                    const c3 = data.eeg_data.channels[2]?.samples?.[data.eeg_data.channels[2]?.samples?.length - 1] || 0;
-                    console.log(`[FILTERED SIGNALS] C1: ${c1.toFixed(6)}, C2: ${c2.toFixed(6)}, C3: ${c3.toFixed(6)}`);
+                } else if (Array.isArray(data.eeg_data.channels[0].samples)) {
+                    const ch1 = data.eeg_data.channels[0].samples[data.eeg_data.channels[0].samples.length - 1];
+                    console.log(`[FILTERED SIGNAL] CH1: ${ch1.toFixed(6)}`);
                 }
             }
 
             // Pass the full eeg_data object to handleEEGData so it can process it correctly
-            // The backend sends: { eeg_data: { channels: [[samples], [samples], ...], ... } }
-            const eegDataWithCount = Object.assign({}, data.eeg_data);
-            if (eegDataWithCount.active_channel_count === undefined && data.signal_info?.active_channel_count !== undefined) {
-                eegDataWithCount.active_channel_count = data.signal_info.active_channel_count;
-            }
+            // The backend sends: { eeg_data: { channels: [[sample1_ch1], [sample2_ch1], ...], ... } }
             this.handleEEGData({
-                eeg_data: eegDataWithCount,
-                channel_names: data.eeg_data.channel_names || ['C3', 'Cz', 'C4'],
+                eeg_data: data.eeg_data,
+                channel_names: data.eeg_data.channel_names || ['CH1'],
                 sampling_rate: data.eeg_data.sampling_rate || 256,
                 timestamp: data.eeg_data.timestamp
             });

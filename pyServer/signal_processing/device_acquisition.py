@@ -63,10 +63,9 @@ class DeviceAcquisition:
     Provides a clean interface for reading data samples.
     """
     
-    def __init__(self, target_channels=3, fs=None, verbose=True):
+    def __init__(self, fs=None, verbose=True):
         self.verbose = bool(verbose)
-        self.requested_target_channels = int(target_channels)
-        self.target_channels = 3  # Fixed to 3 as per serial device protocol
+        self.target_channels = 1  # Only CH1 is used downstream; wire protocol still sends 3 floats/sample
         self.fs = int(fs or 250)  # Default to 250 Hz if not specified
         self.serial_port = None
         self.running = False
@@ -116,7 +115,7 @@ class DeviceAcquisition:
         self.read_thread.start()
 
         if self.verbose:
-            print(f"DeviceAcquisition initialized — fs={self.fs}, requested_target_channels={self.requested_target_channels}")
+            print(f"DeviceAcquisition initialized — fs={self.fs}, target_channels={self.target_channels}")
             print(f"Connected to {self.com_port} at {self.baudrate} baud")
 
     def connect_serial(self, port=None, baudrate=115200):
@@ -185,9 +184,9 @@ class DeviceAcquisition:
                 time.sleep(0.1)
 
     def read_samples(self, num_samples=1, timeout=None):
-        """Read a specified number of samples from the device"""
+        """Read a specified number of samples from the device (CH1 only)"""
         if num_samples <= 0:
-            return np.empty((0, self.requested_target_channels), dtype=np.float64)
+            return np.empty((0, 1), dtype=np.float64)
 
         collected = []
         start_time = time.time()
@@ -214,26 +213,11 @@ class DeviceAcquisition:
             time.sleep(0.001)
 
         if len(collected) == 0:
-            return np.empty((0, self.requested_target_channels), dtype=np.float64)
+            return np.empty((0, 1), dtype=np.float64)
 
-        # Convert to numpy array (fixed to 3 channels from serial device)
+        # Wire protocol delivers 3 floats/sample; only CH1 (column 0) is used downstream.
         out = np.array(collected, dtype=np.float64)
-
-        # Expand or contract the channels to match requested_target_channels
-        if out.shape[1] != self.requested_target_channels and out.shape[0] > 0:
-            if out.shape[1] < self.requested_target_channels:
-                # Expand 3 channels to requested number by repeating values
-                expanded = np.zeros((out.shape[0], self.requested_target_channels))
-                for i in range(out.shape[0]):
-                    # Use the 3 available channels and repeat them to fill requested channels
-                    for ch in range(self.requested_target_channels):
-                        expanded[i, ch] = out[i, ch % 3]  # Cycle through the 3 available channels
-                out = expanded
-            else:
-                # If we had more channels than expected (hypothetically), trim to requested
-                out = out[:, :self.requested_target_channels]
-
-        return out
+        return out[:, 0:1]
 
     def send_command(self, cmd):
         """Send a command to the device"""
