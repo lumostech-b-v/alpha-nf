@@ -109,6 +109,11 @@ class DeviceAcquisition:
         if not self.connect_serial():
             raise RuntimeError(f"Failed to connect to serial device at {self.com_port}")
 
+        # Explicitly set gain — the device does not guarantee its power-on/last-set
+        # gain matches what the app expects, so every connection sets it to 24.
+        self.send_command("Config_GAIN_24")
+        self.send_command("Oprate_NOR_OPR")
+
         # Start data reading thread
         self.running = True
         self.read_thread = threading.Thread(target=self._read_data_loop, daemon=True)
