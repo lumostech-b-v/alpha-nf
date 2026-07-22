@@ -30,10 +30,12 @@ class SessionRecordingPanel {
     this._rawFileCallback = null; // Reference kept so we can deregister it
 
     // Y-axis scaling configuration
+    // Default EEG display is a stable fixed range in microvolts.
+    // Backend sends display EEG in uV only; clinical calculations remain in volts.
     this.yAxisConfig = {
-      adaptive: true,
-      fixedMin: null,
-      fixedMax: null,
+      adaptive: false,
+      fixedMin: -150,
+      fixedMax: 150,
       paddingPercent: 8
     };
   }
@@ -429,10 +431,13 @@ class SessionRecordingPanel {
       return;
     }
     
-    // Show last 5 seconds of data for better waveform visibility
-    // Use sampleRate from settings, fallback to 250 if not set yet
+    // Show the latest 5 seconds of flowing EEG data.
+    // The new backend sends a full display window, not only a tiny incremental chunk.
+    // Therefore we replace the stored values with the latest backend window instead
+    // of appending the full window again and duplicating samples.
     const sampleRate = this.sampleRate || 250;
-    const samplesToShow = sampleRate * 2;
+    const displayWindowSeconds = 5;
+    const samplesToShow = sampleRate * displayWindowSeconds;
     
     // channelData should be an array where each element is an array of values for one channel
     // Format: [[ch1_val1, ch1_val2, ...]] — always a single channel (CH1)
@@ -465,14 +470,13 @@ class SessionRecordingPanel {
       
       if (!ctx) continue;
       
-      // Add new values to the end and keep only the most recent ones
-      for (let i = 0; i < channelValues.length; i++) {
-        values.push(channelValues[i]);
-      }
-      
-      // Keep only the most recent values
-      if (values.length > samplesToShow) {
-        values.splice(0, values.length - samplesToShow);
+      // Replace with the latest backend display window. The backend already maintains
+      // a 5-second rolling display buffer, so appending this full window would duplicate
+      // samples and create the old jumpy/non-flowing plot behavior.
+      values.length = 0;
+      const latestValues = channelValues.slice(-samplesToShow);
+      for (let i = 0; i < latestValues.length; i++) {
+        values.push(latestValues[i]);
       }
       
       // Calculate y-axis limits based on configuration
@@ -1623,6 +1627,62 @@ class SessionRecordingPanel {
     const stopBtn = document.getElementById("recordingStopSessionBtn");
     if (stopBtn) {
       stopBtn.addEventListener("click", () => this.stopSession());
+    }
+  }
+
+  async abortSessionDueToRuntimeError(message = 'Neurofeedback runtime error', errorData = null) {
+    // Backend/device failure path. This intentionally does NOT mark the session
+    // as completed and does NOT show the normal session-complete modal.
+    try {
+      console.error('[SessionRecordingPanel] Aborting runtime session:', message, errorData);
+
+      this.sessionId = null;
+
+      // Deregister CSV/round callbacks so no more rows are accumulated after abort.
+      const wsCallbacks = window.websocket?.callbacks;
+      if (this._csvFeedbackCallback && wsCallbacks?.onFeedback) {
+        const idx = wsCallbacks.onFeedback.indexOf(this._csvFeedbackCallback);
+        if (idx > -1) wsCallbacks.onFeedback.splice(idx, 1);
+        this._csvFeedbackCallback = null;
+      }
+      if (this._csvRoundCallback && wsCallbacks?.onRoundStart) {
+        const idx = wsCallbacks.onRoundStart.indexOf(this._csvRoundCallback);
+        if (idx > -1) wsCallbacks.onRoundStart.splice(idx, 1);
+        this._csvRoundCallback = null;
+      }
+      if (this._rawFileCallback && wsCallbacks?.onRoundComplete) {
+        const idx = wsCallbacks.onRoundComplete.indexOf(this._rawFileCallback);
+        if (idx > -1) wsCallbacks.onRoundComplete.splice(idx, 1);
+        this._rawFileCallback = null;
+      }
+
+      window.charts?.stopRealtimeSimulation?.();
+      this.stopTimer?.();
+      this.closeFeedbackWindow?.();
+      window.websocket?.disconnect?.();
+      window.ui?.updateConnectionStatus?.(false);
+
+      const statusText = document.getElementById('recordingStatusText');
+      if (statusText) statusText.textContent = 'Hardware/Data Error';
+      const statusIndicator = document.getElementById('recordingStatusIndicator');
+      if (statusIndicator) {
+        statusIndicator.classList.remove('recording', 'active');
+        statusIndicator.classList.add('error');
+      }
+      document.getElementById('recordingPauseSessionBtn')?.style.setProperty('display', 'none');
+      document.getElementById('recordingResumeSessionBtn')?.style.setProperty('display', 'none');
+      document.getElementById('recordingStopSessionBtn')?.style.setProperty('display', 'none');
+      this.isPaused = false;
+
+      // Ensure backend/device cleanup is requested, but do not treat failure as
+      // a normal completed session.
+      try {
+        await window.api?.stopNeurofeedbackCore?.();
+      } catch (stopError) {
+        console.warn('Error requesting neurofeedback stop after runtime abort:', stopError);
+      }
+    } catch (abortError) {
+      console.error('Error while aborting runtime session:', abortError);
     }
   }
 

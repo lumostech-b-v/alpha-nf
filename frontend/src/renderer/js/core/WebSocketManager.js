@@ -169,6 +169,7 @@ class WebSocketManager {
                 break;
                 
             case 'complete':
+            case 'session_complete':
                 this.handleSessionComplete(data);
                 break;
                 
@@ -457,7 +458,7 @@ class WebSocketManager {
             this.handleEEGData({
                 eeg_data: data.eeg_data,
                 channel_names: data.eeg_data.channel_names || ['CH1'],
-                sampling_rate: data.eeg_data.sampling_rate || 256,
+                sampling_rate: data.eeg_data.sampling_rate || 250,
                 timestamp: data.eeg_data.timestamp
             });
         } else {
@@ -540,12 +541,20 @@ class WebSocketManager {
 
     handleError(data) {
         console.error('WebSocket error message:', data);
-        const message = data.message || 'The session could not be started.';
+        const message = data.message || 'The neurofeedback session could not continue.';
         window.ui?.showNotification?.(message, 'error');
-        // The backend aborts after sending an error, so no feedback will ever
-        // arrive — stop the session so the UI doesn't hang on "Initializing...".
+
+        // Runtime errors from the clinical backend usually mean hardware/data
+        // failure. Do NOT call the normal stopSession() path here, because that
+        // path marks the session as completed/saved. Use the abort path instead.
         const recordingPanel = window.uiState?.sessionRecordingPanel || window.sessionRecordingPanel;
-        recordingPanel?.stopSession?.();
+        if (recordingPanel && typeof recordingPanel.abortSessionDueToRuntimeError === 'function') {
+            recordingPanel.abortSessionDueToRuntimeError(message, data);
+        } else {
+            window.websocket?.disconnect?.();
+            window.charts?.stopRealtimeSimulation?.();
+            window.ui?.updateConnectionStatus?.(false);
+        }
     }
 
     handleRoundComplete(data) {
@@ -554,25 +563,14 @@ class WebSocketManager {
         const roundNumber = data.round_number || 0;
         const totalRounds = data.total_rounds || 1;
         const isLastRound = roundNumber >= totalRounds;
-        
         const message = data.message || `Round ${roundNumber} completed`;
-        console.log(`Round ${roundNumber} completed`);
+        console.log(message);
         
-        if (isLastRound) {
-            // All rounds done — send resume so backend can finalize, then stop the session.
-            this.resumeSession();
-            setTimeout(() => {
-                const recordingPanel = window.uiState?.sessionRecordingPanel;
-                if (recordingPanel) {
-                    recordingPanel.stopSession();
-                }
-            }, 500);
-        } else {
-            // More rounds remaining — auto-resume after a short pause.
-            setTimeout(() => {
-                console.log(`Automatically resuming to start round ${roundNumber + 1}`);
-                this.resumeSession();
-            }, 1500);
+        // New backend behavior: rounds advance automatically and the final session
+        // is closed by a complete/session_complete message. Do not send resume here;
+        // resume is a legacy command from the previous manual round transition design.
+        if (!isLastRound) {
+            console.log(`Backend will automatically start round ${roundNumber + 1}`);
         }
     }
 

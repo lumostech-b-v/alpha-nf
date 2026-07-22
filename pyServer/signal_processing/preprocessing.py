@@ -57,17 +57,19 @@ def design_bandpass(fs: int, low: float, high: float, order: int = 4, ftype="but
 
 class RealTimeFilter:
     """
-    Real-time filtering using SOS sections with persistent state for each channel.
-    Usage:
-        rt = RealTimeFilter(sos, channels)
-        y, state = rt.apply_block(x_block)
+    Legacy real-time filtering helper using SOS sections with persistent state.
+
+    Kept for backward compatibility. New clinical runtime should use
+    RealTimeEEGFilterChain below. Initial states are zero to avoid the large
+    unscaled sosfilt_zi startup transient for microvolt-level EEG in volts.
     """
 
     def __init__(self, sos, channels: int):
         self.sos = sos
         self.channels = channels
-        # zi per channel and per sos section
-        self.zi = np.array([signal.sosfilt_zi(sos) for _ in range(channels)])
+        # zi per channel and per sos section. Zero initial conditions are safer
+        # for EEG in volts than unscaled sosfilt_zi() unit-step states.
+        self.zi = np.zeros((channels, sos.shape[0], 2), dtype=np.float64)
         # zi shape: (channels, n_sections, 2)
 
     def apply_block(self, x_block: np.ndarray) -> np.ndarray:
@@ -87,6 +89,11 @@ class RealTimeFilter:
 
 class PlotterAlignedFilterChain:
     """
+    DEPRECATED for clinical runtime.
+
+    Kept temporarily only for comparison/debug with the old plotter behavior.
+    New sp_routes/session_runner must use RealTimeEEGFilterChain instead.
+
     Simple zero-phase filter chain (high-pass -> low-pass -> notch)
     that mirrors the filters used in realtime_plotter_mac.py.
 
@@ -176,3 +183,81 @@ def preprocessing_pipeline(data, fs=250):
         filtered_data[:, ch] = signal.filtfilt(b, a, filtered_data[:, ch])
 
     return filtered_data
+
+class RealTimeEEGFilterChain:
+    """
+    Continuous stateful EEG filter chain for clinical neurofeedback runtime.
+
+    This replaces PlotterAlignedFilterChain for live sessions. The old
+    PlotterAlignedFilterChain is kept temporarily for comparison/debug only;
+    it should not be used in the clinical WebSocket route.
+
+    Processing order:
+        high-pass 0.5 Hz -> low-pass 40 Hz -> notch 50 Hz
+
+    Input/output units are unchanged. If input is volts, output is volts.
+    """
+
+    def __init__(
+        self,
+        fs: int = 250,
+        channels: int = 3,
+        highpass_hz: float = 0.5,
+        lowpass_hz: float = 40.0,
+        notch_hz: float = 50.0,
+        notch_q: float = 30.0,
+        order: int = 4,
+    ):
+        self.fs = int(fs)
+        self.channels = int(channels)
+        self.highpass_hz = float(highpass_hz)
+        self.lowpass_hz = float(lowpass_hz)
+        self.notch_hz = float(notch_hz)
+        self.notch_q = float(notch_q)
+        self.order = int(order)
+
+        nyquist = self.fs / 2.0
+        if not (0.0 < self.highpass_hz < nyquist):
+            raise ValueError(f"Invalid highpass_hz={self.highpass_hz} for fs={self.fs}")
+        if not (0.0 < self.lowpass_hz < nyquist):
+            raise ValueError(f"Invalid lowpass_hz={self.lowpass_hz} for fs={self.fs}")
+        if self.highpass_hz >= self.lowpass_hz:
+            raise ValueError("highpass_hz must be lower than lowpass_hz")
+        if not (0.0 < self.notch_hz < nyquist):
+            raise ValueError(f"Invalid notch_hz={self.notch_hz} for fs={self.fs}")
+
+        self.hp_sos = signal.butter(self.order, self.highpass_hz, btype="highpass", fs=self.fs, output="sos")
+        self.lp_sos = signal.butter(self.order, self.lowpass_hz, btype="lowpass", fs=self.fs, output="sos")
+        notch_b, notch_a = signal.iirnotch(w0=self.notch_hz, Q=self.notch_q, fs=self.fs)
+        self.notch_sos = signal.tf2sos(notch_b, notch_a)
+        self.reset()
+
+    def reset(self) -> None:
+        # Use zero initial conditions. Do NOT use unscaled sosfilt_zi here:
+        # sosfilt_zi assumes a unit-step input, which would create enormous
+        # startup transients when the real EEG input is in volts/microvolts.
+        # The session runner performs a short warm-up before baseline/training.
+        self.hp_zi = self._make_zero_zi(self.hp_sos)
+        self.lp_zi = self._make_zero_zi(self.lp_sos)
+        self.notch_zi = self._make_zero_zi(self.notch_sos)
+
+    def process_block(self, raw_block_v: np.ndarray) -> np.ndarray:
+        x = np.asarray(raw_block_v, dtype=np.float64)
+        if x.size == 0:
+            return x.reshape((0, self.channels))
+        if x.ndim == 1:
+            x = x[:, None]
+        if x.ndim != 2:
+            raise ValueError("raw_block_v must have shape (samples, channels)")
+        if x.shape[1] != self.channels:
+            raise ValueError(f"Expected {self.channels} channels, got {x.shape[1]}")
+        if not np.all(np.isfinite(x)):
+            raise ValueError("raw_block_v contains NaN or Inf")
+
+        y, self.hp_zi = signal.sosfilt(self.hp_sos, x, axis=0, zi=self.hp_zi)
+        y, self.lp_zi = signal.sosfilt(self.lp_sos, y, axis=0, zi=self.lp_zi)
+        y, self.notch_zi = signal.sosfilt(self.notch_sos, y, axis=0, zi=self.notch_zi)
+        return y
+
+    def _make_zero_zi(self, sos: np.ndarray) -> np.ndarray:
+        return np.zeros((sos.shape[0], 2, self.channels), dtype=np.float64)

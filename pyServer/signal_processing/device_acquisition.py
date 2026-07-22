@@ -1,134 +1,125 @@
 """
-Device Acquisition Module
+Real hardware EEG acquisition over serial.
 
-A clean and straightforward implementation for acquiring EEG data from the serial device,
-with simple filtering and data handling for neurofeedback applications.
+Clinical neurofeedback route policy:
+- Real hardware only; no simulated fallback.
+- Auto-detect serial port unless config.json explicitly sets device.serial_port.
+- Device stream is fixed: 3 little-endian floats per EEG sample = 12 bytes.
+- Device values are volts.
+- Default clinical gain is 24.
 """
 
-import time
+from __future__ import annotations
+
+import glob
+import json
+import os
 import struct
+import sys
 import threading
+import time
+from collections import deque
+from typing import Optional
+
 import numpy as np
 import serial
-import glob
-import sys
-import os
-from scipy import signal
 
-def _load_serial_port_config() -> str | None:
-    """Return the serial_port value from config.json if set, else None."""
+FS_HZ = 250
+HARDWARE_CHANNELS = 3
+BAUDRATE = 115200
+BYTES_PER_SAMPLE = 12
+UNPACK_FORMAT = "<fff"
+DEFAULT_GAIN = 24
+
+
+def _load_serial_port_config() -> Optional[str]:
+    """Return config.json device.serial_port if present; otherwise None."""
     try:
-        import json
-        config_path = os.path.join(os.path.dirname(__file__), '..', 'config.json')
-        with open(os.path.normpath(config_path)) as f:
+        config_path = os.path.join(os.path.dirname(__file__), "..", "config.json")
+        with open(os.path.normpath(config_path), encoding="utf-8") as f:
             cfg = json.load(f)
-        port = cfg.get('device', {}).get('serial_port', '').strip()
-        return port if port else None
+        port = str(cfg.get("device", {}).get("serial_port", "")).strip()
+        return port or None
     except Exception:
         return None
 
 
-def find_serial_port():
-    """Find the best available serial port for the device (cross-platform)"""
-    if sys.platform.startswith('win'):
-        # Windows: COM ports
+def find_serial_port() -> list[str]:
+    """Find likely serial ports. The caller chooses the first candidate."""
+    if sys.platform.startswith("win"):
         import serial.tools.list_ports
-        ports_info = serial.tools.list_ports.comports()
 
-        # Prioritize USB serial devices — check description, not port name
-        usb_ports = [p.device for p in ports_info if 'USB' in p.description.upper() or 'SERIAL' in p.description.upper()]
-        # Look for potential EEG device names in description
-        eeg_ports = [p.device for p in ports_info if any(k in p.description.lower() for k in ['i8', 'eeg', 'neuro', 'brain']) and p.device not in usb_ports]
+        ports_info = list(serial.tools.list_ports.comports())
+        usb_ports = [p.device for p in ports_info if "USB" in p.description.upper() or "SERIAL" in p.description.upper()]
+        eeg_ports = [
+            p.device
+            for p in ports_info
+            if any(k in p.description.lower() for k in ["i8", "eeg", "neuro", "brain"])
+            and p.device not in usb_ports
+        ]
         other_ports = [p.device for p in ports_info if p.device not in usb_ports and p.device not in eeg_ports]
-
         return usb_ports + eeg_ports + other_ports
-    else:
-        # macOS/Linux: /dev/tty.* and /dev/cu.*
-        ports = glob.glob('/dev/tty.*') + glob.glob('/dev/cu.*')
 
-        # Prioritize USB serial devices
-        usb_ports = [port for port in ports if 'usb' in port.lower()]
-        modem_ports = [port for port in ports if 'modem' in port.lower() and port not in usb_ports]
-        # Look for potential EEG device names
-        eeg_ports = [port for port in ports if any(keyword in port.lower() for keyword in ['serial', 'i8', 'eeg', 'neuro', 'brain']) and port not in usb_ports and port not in modem_ports]
-        other_ports = [port for port in ports if port not in usb_ports and port not in modem_ports and port not in eeg_ports and
-                       not any(skip in port for skip in ['Bluetooth', 'iSerial', 'debug'])]
-
-        return usb_ports + modem_ports + eeg_ports + other_ports
+    ports = glob.glob("/dev/tty.*") + glob.glob("/dev/cu.*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")
+    usb_ports = [p for p in ports if "usb" in p.lower()]
+    modem_ports = [p for p in ports if "modem" in p.lower() and p not in usb_ports]
+    eeg_ports = [
+        p
+        for p in ports
+        if any(k in p.lower() for k in ["serial", "i8", "eeg", "neuro", "brain"])
+        and p not in usb_ports
+        and p not in modem_ports
+    ]
+    other_ports = [p for p in ports if p not in usb_ports and p not in modem_ports and p not in eeg_ports]
+    return usb_ports + modem_ports + eeg_ports + other_ports
 
 
 class DeviceAcquisition:
-    """
-    Device acquisition for EEG data from serial device.
-    Provides a clean interface for reading data samples.
-    """
-    
-    def __init__(self, fs=None, verbose=True):
+    """Threaded acquisition wrapper for the 3-channel serial EEG device."""
+
+    def __init__(
+        self,
+        target_channels: int = HARDWARE_CHANNELS,
+        fs: int = FS_HZ,
+        verbose: bool = False,
+        port: Optional[str] = None,
+        baudrate: int = BAUDRATE,
+        max_buffer_seconds: float = 10.0,
+    ):
+        if int(target_channels) != HARDWARE_CHANNELS:
+            raise ValueError("Device protocol is fixed to 3 hardware channels; use active-channel mapping clinically")
+        self.target_channels = HARDWARE_CHANNELS
+        self.fs = int(fs or FS_HZ)
+        if self.fs != FS_HZ:
+            raise ValueError("Hardware sampling rate is fixed at 250 Hz")
         self.verbose = bool(verbose)
-        self.target_channels = 1  # Only CH1 is used downstream; wire protocol still sends 3 floats/sample
-        self.fs = int(fs or 250)  # Default to 250 Hz if not specified
-        self.serial_port = None
-        self.running = False
-        self.data_buffer = []
+        self.baudrate = int(baudrate)
+        self.max_buffer_samples = max(HARDWARE_CHANNELS, int(max_buffer_seconds * self.fs))
+        self.data_buffer: deque[list[float]] = deque(maxlen=self.max_buffer_samples)
         self.data_lock = threading.Lock()
+        self.byte_lock = threading.Lock()
+        self.running = False
+        self.read_thread: Optional[threading.Thread] = None
+        self.serial_port: Optional[serial.Serial] = None
+        self.byte_buffer = bytearray()
 
-        # Threading for continuous data reading
-        self.read_thread = None
-
-        # Use port from config.json if set, otherwise auto-detect
-        configured_port = _load_serial_port_config()
-        if configured_port:
-            self.com_port = configured_port
-            if self.verbose:
-                print(f"Using configured serial port: {self.com_port}")
-        else:
-            available_ports = find_serial_port()
-            if self.verbose and available_ports:
-                print(f"Available serial ports found: {available_ports}")
-            elif self.verbose:
-                print("No serial ports found! Available ports on system:")
-                if sys.platform.startswith('win'):
-                    import serial.tools.list_ports
-                    ports_info = serial.tools.list_ports.comports()
-                    for port_info in ports_info:
-                        print(f"  {port_info.device} - {port_info.description}")
-                    print("Defaulting to COM3 - make sure your device is connected!")
-                else:
-                    system_ports = glob.glob('/dev/tty.*') + glob.glob('/dev/cu.*')
-                    for port in system_ports:
-                        print(f"  {port}")
-                    print("Defaulting to /dev/tty.usbserial - make sure your device is connected!")
-
-            if sys.platform.startswith('win'):
-                self.com_port = available_ports[0] if available_ports else 'COM3'
-            else:
-                self.com_port = available_ports[0] if available_ports else '/dev/tty.usbserial'
-        self.baudrate = 115200
-
-        # Connect to the device
-        if not self.connect_serial():
-            raise RuntimeError(f"Failed to connect to serial device at {self.com_port}")
-
-        # Explicitly set gain — the device does not guarantee its power-on/last-set
-        # gain matches what the app expects, so every connection sets it to 24.
-        self.send_command("Config_GAIN_24")
-        self.send_command("Oprate_NOR_OPR")
-
-        # Start data reading thread
+        self.com_port = port or _load_serial_port_config() or self._auto_detect_port()
+        self.connect_serial(self.com_port, self.baudrate)
         self.running = True
         self.read_thread = threading.Thread(target=self._read_data_loop, daemon=True)
         self.read_thread.start()
 
+    def _auto_detect_port(self) -> str:
+        ports = find_serial_port()
+        if not ports:
+            raise RuntimeError("No serial ports found for EEG device")
         if self.verbose:
-            print(f"DeviceAcquisition initialized — fs={self.fs}, target_channels={self.target_channels}")
-            print(f"Connected to {self.com_port} at {self.baudrate} baud")
+            print(f"Available serial ports: {ports}; using {ports[0]}")
+        return ports[0]
 
-    def connect_serial(self, port=None, baudrate=115200):
-        """Connect to the serial port"""
-        if port:
-            self.com_port = port
-        self.baudrate = baudrate
-
+    def connect_serial(self, port: str, baudrate: int = BAUDRATE) -> bool:
+        self.com_port = port
+        self.baudrate = int(baudrate)
         try:
             self.serial_port = serial.Serial(
                 port=self.com_port,
@@ -136,103 +127,106 @@ class DeviceAcquisition:
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
-                timeout=1
+                timeout=1,
             )
-            self.serial_port.reset_input_buffer()  # discard pre-start zeros
+            self.serial_port.reset_input_buffer()
             if self.verbose:
                 print(f"Connected to {self.com_port} at {self.baudrate} baud")
             return True
-        except serial.SerialException as e:
-            if self.verbose:
-                print(f"Error connecting to {self.com_port}: {e}")
-                print("Available ports on your system:")
-                for port in find_serial_port():
-                    print(f"  {port}")
-            return False
+        except serial.SerialException as exc:
+            raise RuntimeError(f"Failed to connect to serial device at {self.com_port}: {exc}") from exc
 
-    def _read_data_loop(self):
-        """Continuously read data from serial port"""
-        bytes_per_sample = 12  # 3 floats * 4 bytes = 12 bytes
-        buffer = bytearray()
-        
+    def configure_for_neurofeedback(self, gain: int = DEFAULT_GAIN) -> None:
+        if gain not in (8, 12, 24):
+            raise ValueError("gain must be 8, 12, or 24")
+        self.send_command(f"Config_GAIN_{gain:02d}")
+        time.sleep(0.1)
+        self.send_command("Oprate_NOR_OPR")
+        time.sleep(0.1)
+        self.clear_buffers(reset_serial=True)
+
+    def start_streaming(self) -> None:
+        self.clear_buffers(reset_serial=True)
+        self.send_command("Contl_STRT_AQU")
+
+    def stop_streaming(self) -> None:
+        try:
+            self.send_command("Contl_STOP_AQU")
+        except Exception:
+            pass
+
+    def clear_buffers(self, reset_serial: bool = False) -> None:
+        with self.data_lock:
+            self.data_buffer.clear()
+        with self.byte_lock:
+            self.byte_buffer.clear()
+        if reset_serial and self.serial_port and self.serial_port.is_open:
+            try:
+                self.serial_port.reset_input_buffer()
+            except Exception:
+                pass
+
+    def _read_data_loop(self) -> None:
         while self.running:
             try:
-                if self.serial_port and self.serial_port.is_open:
-                    available = self.serial_port.in_waiting
-                    if available > 0:
-                        new_data = self.serial_port.read(available)
-                        buffer.extend(new_data)
-                        
-                        # Process complete samples
-                        while len(buffer) >= bytes_per_sample:
-                            sample_bytes = buffer[:bytes_per_sample]
-                            buffer = buffer[bytes_per_sample:]
-                            
-                            try:
-                                # Unpack 3 float values
-                                val1, val2, val3 = struct.unpack('<fff', sample_bytes)
-                                
-                                # Print raw signal values for debugging if verbose is enabled
-                                if self.verbose:
-                                    print(f"[C1: {val1:.6f}, C2: {val2:.6f}, C3: {val3:.6f}]")
-
-                                # Add to buffer with thread safety
-                                with self.data_lock:
-                                    self.data_buffer.append([val1, val2, val3])
-                                    if len(self.data_buffer) > 1000:  # Keep buffer size reasonable
-                                        self.data_buffer.pop(0)  # Remove oldest
-                            except struct.error:
-                                continue  # Skip malformed data
-                else:
+                if not (self.serial_port and self.serial_port.is_open):
                     time.sleep(0.01)
+                    continue
+                available = self.serial_port.in_waiting
+                if available <= 0:
+                    time.sleep(0.001)
+                    continue
+                chunk = self.serial_port.read(available)
+                samples: list[list[float]] = []
+                with self.byte_lock:
+                    self.byte_buffer.extend(chunk)
+                    while len(self.byte_buffer) >= BYTES_PER_SAMPLE:
+                        sample_bytes = bytes(self.byte_buffer[:BYTES_PER_SAMPLE])
+                        del self.byte_buffer[:BYTES_PER_SAMPLE]
+                        try:
+                            val1, val2, val3 = struct.unpack(UNPACK_FORMAT, sample_bytes)
+                        except struct.error:
+                            continue
+                        if not (np.isfinite(val1) and np.isfinite(val2) and np.isfinite(val3)):
+                            continue
+                        samples.append([float(val1), float(val2), float(val3)])
+                if samples:
+                    if self.verbose:
+                        for val1, val2, val3 in samples:
+                            print(f"[C1: {val1:.9f}, C2: {val2:.9f}, C3: {val3:.9f}]")
+                    with self.data_lock:
+                        self.data_buffer.extend(samples)
             except Exception:
-                time.sleep(0.1)
+                time.sleep(0.05)
 
-    def read_samples(self, num_samples=1, timeout=None):
-        """Read a specified number of samples from the device (CH1 only)"""
+    def read_samples(self, num_samples: int = 1, timeout: Optional[float] = None) -> np.ndarray:
         if num_samples <= 0:
-            return np.empty((0, 1), dtype=np.float64)
-
-        collected = []
-        start_time = time.time()
-        timeout = float(timeout) if timeout is not None else max(5.0, num_samples / max(1, self.fs) * 2.0)
-
+            return np.empty((0, HARDWARE_CHANNELS), dtype=np.float64)
+        collected: list[list[float]] = []
+        start = time.time()
+        timeout_s = float(timeout) if timeout is not None else max(1.0, num_samples / self.fs * 3.0)
         while len(collected) < num_samples:
-            # Get samples from buffer with thread safety
             with self.data_lock:
-                if len(self.data_buffer) > 0:
-                    # Take as many samples as possible up to what we need
-                    available = min(len(self.data_buffer), num_samples - len(collected))
-                    for i in range(available):
-                        collected.append(self.data_buffer.pop(0))
-
-            # Check if we have enough samples
+                while self.data_buffer and len(collected) < num_samples:
+                    collected.append(self.data_buffer.popleft())
             if len(collected) >= num_samples:
                 break
-
-            # Check timeout
-            if time.time() - start_time > timeout:
+            if time.time() - start > timeout_s:
                 break
-
-            # Small delay to prevent busy waiting
             time.sleep(0.001)
+        if not collected:
+            return np.empty((0, HARDWARE_CHANNELS), dtype=np.float64)
+        return np.asarray(collected, dtype=np.float64).reshape((-1, HARDWARE_CHANNELS))
 
-        if len(collected) == 0:
-            return np.empty((0, 1), dtype=np.float64)
+    def send_command(self, cmd: str) -> bool:
+        if not (self.serial_port and self.serial_port.is_open):
+            raise RuntimeError("Serial port is not open")
+        command = cmd if cmd.endswith("\r\n") else f"{cmd}\r\n"
+        self.serial_port.write(command.encode("ascii"))
+        self.serial_port.flush()
+        return True
 
-        # Wire protocol delivers 3 floats/sample; only CH1 (column 0) is used downstream.
-        out = np.array(collected, dtype=np.float64)
-        return out[:, 0:1]
-
-    def send_command(self, cmd):
-        """Send a command to the device"""
-        if self.serial_port and self.serial_port.is_open:
-            if not cmd.endswith('\r\n'):
-                cmd += '\r\n'
-            self.serial_port.write(cmd.encode('ascii'))
-
-    def stop(self):
-        """Stop the acquisition and close connection"""
+    def stop(self) -> None:
         self.running = False
         if self.read_thread and self.read_thread.is_alive():
             self.read_thread.join(timeout=1.0)
@@ -241,6 +235,5 @@ class DeviceAcquisition:
             if self.verbose:
                 print("Serial port closed")
 
-    def is_running(self):
-        """Check if the device acquisition is still running"""
-        return self.running
+    def is_running(self) -> bool:
+        return bool(self.running and self.read_thread and self.read_thread.is_alive())
