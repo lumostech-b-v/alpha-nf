@@ -49,7 +49,7 @@ def find_serial_port() -> list[str]:
     if sys.platform.startswith("win"):
         import serial.tools.list_ports
 
-        ports_info = list(serial.tools.list_ports.comports())
+        ports_info = [p for p in serial.tools.list_ports.comports() if "bluetooth" not in p.description.lower()]
         usb_ports = [p.device for p in ports_info if "USB" in p.description.upper() or "SERIAL" in p.description.upper()]
         eeg_ports = [
             p.device
@@ -61,7 +61,9 @@ def find_serial_port() -> list[str]:
         return usb_ports + eeg_ports + other_ports
 
     ports = glob.glob("/dev/tty.*") + glob.glob("/dev/cu.*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")
-    usb_ports = [p for p in ports if "usb" in p.lower()]
+    # Bluetooth/debug ports open successfully but never stream EEG data — never valid candidates.
+    ports = [p for p in ports if not any(skip in p.lower() for skip in ("bluetooth", "iserial", "debug"))]
+    usb_ports = [p for p in ports if "usb" in p.lower() or "acm" in p.lower()]
     modem_ports = [p for p in ports if "modem" in p.lower() and p not in usb_ports]
     eeg_ports = [
         p
@@ -70,8 +72,10 @@ def find_serial_port() -> list[str]:
         and p not in usb_ports
         and p not in modem_ports
     ]
-    other_ports = [p for p in ports if p not in usb_ports and p not in modem_ports and p not in eeg_ports]
-    return usb_ports + modem_ports + eeg_ports + other_ports
+    # No catch-all fallback: on macOS every paired Bluetooth device exposes a port named
+    # after itself (e.g. /dev/cu.<HeadphoneName>) that opens fine but never streams.
+    # Unrecognized ports must be selected explicitly via config.json device.serial_port.
+    return usb_ports + modem_ports + eeg_ports
 
 
 class DeviceAcquisition:
@@ -112,7 +116,10 @@ class DeviceAcquisition:
     def _auto_detect_port(self) -> str:
         ports = find_serial_port()
         if not ports:
-            raise RuntimeError("No serial ports found for EEG device")
+            raise RuntimeError(
+                "No serial port found for the EEG device (Bluetooth/debug ports are ignored). "
+                "Plug in the device via USB, or set device.serial_port in config.json."
+            )
         if self.verbose:
             print(f"Available serial ports: {ports}; using {ports[0]}")
         return ports[0]

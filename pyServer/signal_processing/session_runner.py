@@ -101,16 +101,21 @@ async def initialize_real_device(logger: logging.Logger) -> DeviceAcquisition:
         await asyncio.to_thread(device.start_streaming)
         # Give the firmware a short moment to start streaming.
         await asyncio.sleep(0.2)
-        test_block = await asyncio.to_thread(device.read_samples, FS_HZ, 2.5)
+        # The device can take several seconds to begin streaming after Contl_STRT_AQU;
+        # read_samples returns as soon as it has FS_HZ samples, so the long timeout
+        # only matters when the device is slow or absent.
+        test_block = await asyncio.to_thread(device.read_samples, FS_HZ, 10.0)
         validate_device_block(test_block, min_samples=max(50, FS_HZ // 2))
         logger.info("Device stream validated: shape=%s, fs=%s, gain=%s", test_block.shape, FS_HZ, DEFAULT_GAIN)
         return device
-    except Exception:
+    except Exception as exc:
         try:
             await asyncio.to_thread(device.stop_streaming)
             await asyncio.to_thread(device.stop)
         finally:
             pass
+        if isinstance(exc, DeviceDataError):
+            raise DeviceDataError(f"{exc} (port: {device.com_port})") from exc
         raise
 
 
