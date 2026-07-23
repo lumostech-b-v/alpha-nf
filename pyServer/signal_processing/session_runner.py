@@ -108,17 +108,27 @@ async def initialize_real_device(logger: logging.Logger) -> DeviceAcquisition:
                 await asyncio.sleep(0.5)
                 await asyncio.to_thread(device.clear_buffers, True)
             await asyncio.to_thread(device.start_streaming)
-            # read_samples returns as soon as it has FS_HZ samples, so the timeout
-            # only matters when the device is slow or absent.
-            test_block = await asyncio.to_thread(device.read_samples, FS_HZ, 4.0)
-            try:
-                validate_device_block(test_block, min_samples=max(50, FS_HZ // 2))
-            except DeviceDataError as exc:
-                last_error = exc
-                logger.warning(
-                    "Device validation attempt %s/3 failed: %s (port=%s, raw bytes received=%s, read errors=%s)",
-                    attempt, exc, device.com_port, device.bytes_received, device.read_error_count,
-                )
+            # The device emits zero-valued warm-up samples around acquisition start
+            # (see the 2.0.4-era "pre-start zeros" note), so keep reading blocks and
+            # discard flat ones until real signal appears or the deadline passes.
+            deadline = time.monotonic() + 8.0
+            while True:
+                # read_samples returns as soon as it has FS_HZ samples, so the timeout
+                # only matters when the device is slow or absent.
+                test_block = await asyncio.to_thread(device.read_samples, FS_HZ, 4.0)
+                try:
+                    validate_device_block(test_block, min_samples=max(50, FS_HZ // 2))
+                    last_error = None
+                except DeviceDataError as exc:
+                    last_error = exc
+                    if time.monotonic() < deadline:
+                        continue
+                    logger.warning(
+                        "Device validation attempt %s/3 failed: %s (port=%s, raw bytes received=%s, read errors=%s)",
+                        attempt, exc, device.com_port, device.bytes_received, device.read_error_count,
+                    )
+                break
+            if last_error is not None:
                 continue
             logger.info("Device stream validated: shape=%s, fs=%s (gain left at device default)", test_block.shape, FS_HZ)
             return device
@@ -135,7 +145,7 @@ async def initialize_real_device(logger: logging.Logger) -> DeviceAcquisition:
         raise
 
 
-def validate_device_block(block: np.ndarray, min_samples: int = 1) -> None:
+def validate_device_block(block: np.ndarray, min_samples: int = 1, require_signal: bool = True) -> None:
     x = np.asarray(block, dtype=np.float64)
     if x.ndim != 2 or x.shape[1] != HARDWARE_CHANNELS:
         raise DeviceDataError(f"Expected hardware block shape (samples, 3), got {x.shape}")
@@ -143,9 +153,13 @@ def validate_device_block(block: np.ndarray, min_samples: int = 1) -> None:
         raise DeviceDataError(f"Insufficient real hardware samples: got {x.shape[0]}, expected at least {min_samples}")
     if not np.all(np.isfinite(x)):
         raise DeviceDataError("Hardware stream contains NaN or Inf")
+    if not require_signal:
+        return
+    # The device emits zero-valued "warm-up" samples around acquisition start, so a
+    # flat block is only meaningful during initialization, where the caller retries
+    # until real signal appears.
     if np.allclose(x, 0.0):
         raise DeviceDataError("Hardware stream is all zeros")
-    # A completely flat stream usually means the device is not delivering real EEG-like data.
     if float(np.nanstd(x)) <= 1e-15:
         raise DeviceDataError("Hardware stream is flat/constant")
 
@@ -412,9 +426,13 @@ async def read_step_block(ctx: NeurofeedbackSessionContext) -> np.ndarray:
         expected,
         max(1.0, ctx.session_config.runtime_step_seconds * 3.0),
     )
-    validate_device_block(block, min_samples=expected)
+    # A flat/zero block mid-session (leads off, brief settling) is not fatal — like the
+    # artifact checks it is informational; only missing/corrupt data aborts the session.
+    validate_device_block(block, min_samples=expected, require_signal=False)
     if block.shape[0] != expected:
         raise DeviceDataError(f"Expected exactly {expected} samples per runtime step, got {block.shape[0]}")
+    if np.allclose(block, 0.0):
+        ctx.logger.warning("Runtime step block is all zeros (leads off or device settling)")
     return block
 
 
