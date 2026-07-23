@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import glob
 import json
+import logging
 import os
 import struct
 import sys
@@ -23,6 +24,8 @@ from typing import Optional
 
 import numpy as np
 import serial
+
+logger = logging.getLogger(__name__)
 
 FS_HZ = 250
 HARDWARE_CHANNELS = 3
@@ -78,6 +81,20 @@ def find_serial_port() -> list[str]:
     return usb_ports + modem_ports + eeg_ports
 
 
+def list_ports_diagnostic() -> str:
+    """Human-readable summary of every serial port on the system, for error messages."""
+    try:
+        if sys.platform.startswith("win"):
+            import serial.tools.list_ports
+
+            entries = [f"{p.device} ({p.description})" for p in serial.tools.list_ports.comports()]
+        else:
+            entries = glob.glob("/dev/tty.*") + glob.glob("/dev/cu.*") + glob.glob("/dev/ttyUSB*") + glob.glob("/dev/ttyACM*")
+        return "; ".join(entries) if entries else "none"
+    except Exception as exc:
+        return f"unavailable ({exc})"
+
+
 class DeviceAcquisition:
     """Threaded acquisition wrapper for the 3-channel serial EEG device."""
 
@@ -106,6 +123,9 @@ class DeviceAcquisition:
         self.read_thread: Optional[threading.Thread] = None
         self.serial_port: Optional[serial.Serial] = None
         self.byte_buffer = bytearray()
+        self.bytes_received = 0
+        self.samples_received = 0
+        self.read_error_count = 0
 
         self.com_port = port or _load_serial_port_config() or self._auto_detect_port()
         self.connect_serial(self.com_port, self.baudrate)
@@ -115,6 +135,7 @@ class DeviceAcquisition:
 
     def _auto_detect_port(self) -> str:
         ports = find_serial_port()
+        logger.info("Serial port candidates: %s (all system ports: %s)", ports, list_ports_diagnostic())
         if not ports:
             raise RuntimeError(
                 "No serial port found for the EEG device (Bluetooth/debug ports are ignored). "
@@ -184,6 +205,7 @@ class DeviceAcquisition:
                     time.sleep(0.001)
                     continue
                 chunk = self.serial_port.read(available)
+                self.bytes_received += len(chunk)
                 samples: list[list[float]] = []
                 with self.byte_lock:
                     self.byte_buffer.extend(chunk)
@@ -198,12 +220,16 @@ class DeviceAcquisition:
                             continue
                         samples.append([float(val1), float(val2), float(val3)])
                 if samples:
+                    self.samples_received += len(samples)
                     if self.verbose:
                         for val1, val2, val3 in samples:
                             print(f"[C1: {val1:.9f}, C2: {val2:.9f}, C3: {val3:.9f}]")
                     with self.data_lock:
                         self.data_buffer.extend(samples)
-            except Exception:
+            except Exception as exc:
+                self.read_error_count += 1
+                if self.read_error_count <= 5:
+                    logger.warning("Serial read loop error on %s: %r", self.com_port, exc)
                 time.sleep(0.05)
 
     def read_samples(self, num_samples: int = 1, timeout: Optional[float] = None) -> np.ndarray:

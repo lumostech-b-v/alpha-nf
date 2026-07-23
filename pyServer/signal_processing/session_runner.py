@@ -23,7 +23,7 @@ from signal_processing.baseline import (
     initialize_round_baseline_state,
     lock_baseline_thresholds,
 )
-from signal_processing.device_acquisition import DeviceAcquisition
+from signal_processing.device_acquisition import DeviceAcquisition, list_ports_diagnostic
 from signal_processing.feedback_runtime import (
     calculate_success_rate,
     evaluate_epoch_binary,
@@ -97,25 +97,38 @@ async def initialize_real_device(logger: logging.Logger) -> DeviceAcquisition:
         verbose=False,
     )
     try:
-        await asyncio.to_thread(device.configure_for_neurofeedback, DEFAULT_GAIN)
-        await asyncio.to_thread(device.start_streaming)
-        # Give the firmware a short moment to start streaming.
-        await asyncio.sleep(0.2)
-        # The device can take several seconds to begin streaming after Contl_STRT_AQU;
-        # read_samples returns as soon as it has FS_HZ samples, so the long timeout
-        # only matters when the device is slow or absent.
-        test_block = await asyncio.to_thread(device.read_samples, FS_HZ, 10.0)
-        validate_device_block(test_block, min_samples=max(50, FS_HZ // 2))
-        logger.info("Device stream validated: shape=%s, fs=%s, gain=%s", test_block.shape, FS_HZ, DEFAULT_GAIN)
-        return device
-    except Exception as exc:
+        last_error: Optional[DeviceDataError] = None
+        for attempt in range(1, 4):
+            # Re-send the configure/start sequence each attempt: the device can miss
+            # commands sent right after the port opens (e.g. while resetting on open).
+            await asyncio.to_thread(device.configure_for_neurofeedback, DEFAULT_GAIN)
+            await asyncio.to_thread(device.start_streaming)
+            # Give the firmware a short moment to start streaming.
+            await asyncio.sleep(0.2)
+            # read_samples returns as soon as it has FS_HZ samples, so the timeout
+            # only matters when the device is slow or absent.
+            test_block = await asyncio.to_thread(device.read_samples, FS_HZ, 4.0)
+            try:
+                validate_device_block(test_block, min_samples=max(50, FS_HZ // 2))
+            except DeviceDataError as exc:
+                last_error = exc
+                logger.warning(
+                    "Device validation attempt %s/3 failed: %s (port=%s, raw bytes received=%s, read errors=%s)",
+                    attempt, exc, device.com_port, device.bytes_received, device.read_error_count,
+                )
+                continue
+            logger.info("Device stream validated: shape=%s, fs=%s, gain=%s", test_block.shape, FS_HZ, DEFAULT_GAIN)
+            return device
+        raise DeviceDataError(
+            f"{last_error} (port: {device.com_port}, raw bytes received: {device.bytes_received}, "
+            f"read errors: {device.read_error_count}, system ports: {list_ports_diagnostic()})"
+        )
+    except Exception:
         try:
             await asyncio.to_thread(device.stop_streaming)
             await asyncio.to_thread(device.stop)
         finally:
             pass
-        if isinstance(exc, DeviceDataError):
-            raise DeviceDataError(f"{exc} (port: {device.com_port})") from exc
         raise
 
 
