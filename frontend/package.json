@@ -1,6 +1,6 @@
 {
   "name": "doctor-management-system",
-  "version": "2.0.8",
+  "version": "2.0.9",
   "description": "Modern Electron app for Doctor Management System",
   "main": "src/main.js",
   "scripts": {
