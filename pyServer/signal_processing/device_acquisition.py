@@ -165,16 +165,14 @@ class DeviceAcquisition:
             raise RuntimeError(f"Failed to connect to serial device at {self.com_port}: {exc}") from exc
 
     def configure_for_neurofeedback(self, gain: int = DEFAULT_GAIN) -> None:
+        # Mirrors the proven 2.0.5 sequence exactly: commands sent back-to-back,
+        # no inter-command delays and no buffer resets afterwards.
         if gain not in (8, 12, 24):
             raise ValueError("gain must be 8, 12, or 24")
         self.send_command(f"Config_GAIN_{gain:02d}")
-        time.sleep(0.1)
         self.send_command("Oprate_NOR_OPR")
-        time.sleep(0.1)
-        self.clear_buffers(reset_serial=True)
 
     def start_streaming(self) -> None:
-        self.clear_buffers(reset_serial=True)
         self.send_command("Contl_STRT_AQU")
 
     def stop_streaming(self) -> None:
@@ -256,7 +254,6 @@ class DeviceAcquisition:
             raise RuntimeError("Serial port is not open")
         command = cmd if cmd.endswith("\r\n") else f"{cmd}\r\n"
         self.serial_port.write(command.encode("ascii"))
-        self.serial_port.flush()
         return True
 
     def stop(self) -> None:
