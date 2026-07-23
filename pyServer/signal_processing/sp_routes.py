@@ -123,35 +123,38 @@ async def nfcore(websocket: WebSocket) -> None:
     global _nfcore_stop_event
 
     await websocket.accept()
+    active_connections.add(websocket)
+    logger.info("Neurofeedback WebSocket connected")
 
-    lock = _get_nfcore_session_lock()
-    if lock.locked():
-        await websocket.send_json(build_error_payload("Another neurofeedback session is already running"))
-        return
+    try:
+        await websocket.send_json({
+            "type": "welcome",
+            "time": datetime.now(timezone.utc).isoformat(),
+            "message": "WebSocket ready for streaming",
+        })
 
-    async with lock:
-        _nfcore_stop_event = asyncio.Event()
-        active_connections.add(websocket)
-        logger.info("Neurofeedback WebSocket connected")
+        start_command = await websocket.receive_json()
+        logger.debug("Received neurofeedback start_command: %s", start_command)
+        await websocket.send_json({
+            "type": "echo",
+            "time": datetime.now(timezone.utc).isoformat(),
+            "message": f"Start command received {start_command}",
+        })
 
-        try:
-            await websocket.send_json({
-                "type": "welcome",
-                "time": datetime.now(timezone.utc).isoformat(),
-                "message": "WebSocket ready for streaming",
-            })
+        if not start_command.get("start"):
+            await websocket.send_json(build_error_payload("Start command must include start=true"))
+            return
 
-            start_command = await websocket.receive_json()
-            logger.debug("Received neurofeedback start_command: %s", start_command)
-            await websocket.send_json({
-                "type": "echo",
-                "time": datetime.now(timezone.utc).isoformat(),
-                "message": f"Start command received {start_command}",
-            })
+        # The app keeps this socket open from startup; only a real start command
+        # claims the single-session lock, so idle connections never block the
+        # device diagnostic or another session.
+        lock = _get_nfcore_session_lock()
+        if lock.locked():
+            await websocket.send_json(build_error_payload("Another neurofeedback session is already running"))
+            return
 
-            if not start_command.get("start"):
-                await websocket.send_json(build_error_payload("Start command must include start=true"))
-                return
+        async with lock:
+            _nfcore_stop_event = asyncio.Event()
 
             patient_name = _resolve_patient_name(start_command.get("patientId"))
             session_config = SessionConfig.from_start_command(start_command, patient_name=patient_name)
@@ -174,21 +177,21 @@ async def nfcore(websocket: WebSocket) -> None:
                 stop_event=_nfcore_stop_event,
             )
 
-        except WebSocketDisconnect:
-            logger.info("Neurofeedback WebSocket disconnected")
-        except Exception as exc:
-            logger.exception("nfcore failed: %s", exc)
-            try:
-                await websocket.send_json(build_error_payload(str(exc)))
-            except Exception:
-                pass
-        finally:
-            _nfcore_stop_event = None
-            try:
-                active_connections.discard(websocket)
-            except Exception:
-                pass
-            logger.info("Neurofeedback WebSocket session closed")
+    except WebSocketDisconnect:
+        logger.info("Neurofeedback WebSocket disconnected")
+    except Exception as exc:
+        logger.exception("nfcore failed: %s", exc)
+        try:
+            await websocket.send_json(build_error_payload(str(exc)))
+        except Exception:
+            pass
+    finally:
+        _nfcore_stop_event = None
+        try:
+            active_connections.discard(websocket)
+        except Exception:
+            pass
+        logger.info("Neurofeedback WebSocket session closed")
 
 
 @router.post("/nfcore_stop")

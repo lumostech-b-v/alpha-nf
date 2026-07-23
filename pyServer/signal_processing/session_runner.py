@@ -99,15 +99,15 @@ async def initialize_real_device(logger: logging.Logger) -> DeviceAcquisition:
     try:
         last_error: Optional[DeviceDataError] = None
         for attempt in range(1, 4):
-            # First attempt mirrors the proven 2.0.5 flow: gain + operate + start sent
-            # back-to-back right after the port opens, then read immediately.
+            # First attempt mirrors the proven 2.0.5 flow exactly: the constructor already
+            # sent gain + operate right after the port opened, so only start is sent here.
             if attempt > 1:
                 # The device may have missed commands sent right after the port opened
                 # (e.g. while resetting on open): stop, settle, and start over.
                 await asyncio.to_thread(device.stop_streaming)
                 await asyncio.sleep(0.5)
                 await asyncio.to_thread(device.clear_buffers, True)
-            await asyncio.to_thread(device.configure_for_neurofeedback, DEFAULT_GAIN)
+                await asyncio.to_thread(device.configure_for_neurofeedback, DEFAULT_GAIN)
             await asyncio.to_thread(device.start_streaming)
             # read_samples returns as soon as it has FS_HZ samples, so the timeout
             # only matters when the device is slow or absent.

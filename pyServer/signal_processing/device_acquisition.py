@@ -129,6 +129,9 @@ class DeviceAcquisition:
 
         self.com_port = port or _load_serial_port_config() or self._auto_detect_port()
         self.connect_serial(self.com_port, self.baudrate)
+        # 2.0.5 sent gain + operate mode synchronously right after the port opened,
+        # before the read thread was started; keep that exact ordering.
+        self.configure_for_neurofeedback(DEFAULT_GAIN)
         self.running = True
         self.read_thread = threading.Thread(target=self._read_data_loop, daemon=True)
         self.read_thread.start()
