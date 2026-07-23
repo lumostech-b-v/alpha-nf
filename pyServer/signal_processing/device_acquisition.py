@@ -129,9 +129,6 @@ class DeviceAcquisition:
 
         self.com_port = port or _load_serial_port_config() or self._auto_detect_port()
         self.connect_serial(self.com_port, self.baudrate)
-        # 2.0.5 sent gain + operate mode synchronously right after the port opened,
-        # before the read thread was started; keep that exact ordering.
-        self.configure_for_neurofeedback(DEFAULT_GAIN)
         self.running = True
         self.read_thread = threading.Thread(target=self._read_data_loop, daemon=True)
         self.read_thread.start()
@@ -168,12 +165,16 @@ class DeviceAcquisition:
             raise RuntimeError(f"Failed to connect to serial device at {self.com_port}: {exc}") from exc
 
     def configure_for_neurofeedback(self, gain: int = DEFAULT_GAIN) -> None:
-        # Mirrors the proven 2.0.5 sequence exactly: commands sent back-to-back,
-        # no inter-command delays and no buffer resets afterwards.
+        # NOT used by the live session path. Sending Config_GAIN/Oprate_NOR_OPR as a
+        # burst right before Contl_STRT_AQU silences the device (the 2.0.5 regression);
+        # the live path sends only Contl_STRT_AQU, like 2.0.4. Kept for tooling that
+        # deliberately configures gain with proper settling time between commands.
         if gain not in (8, 12, 24):
             raise ValueError("gain must be 8, 12, or 24")
         self.send_command(f"Config_GAIN_{gain:02d}")
+        time.sleep(0.1)
         self.send_command("Oprate_NOR_OPR")
+        time.sleep(0.1)
 
     def start_streaming(self) -> None:
         self.send_command("Contl_STRT_AQU")

@@ -99,15 +99,14 @@ async def initialize_real_device(logger: logging.Logger) -> DeviceAcquisition:
     try:
         last_error: Optional[DeviceDataError] = None
         for attempt in range(1, 4):
-            # First attempt mirrors the proven 2.0.5 flow exactly: the constructor already
-            # sent gain + operate right after the port opened, so only start is sent here.
+            # Mirrors the last-known-good 2.0.4 flow: Contl_STRT_AQU is the ONLY command
+            # ever sent to the device. The Config_GAIN_24/Oprate_NOR_OPR burst introduced
+            # in 2.0.5 silences the device (mode switch drops the start command) — do not
+            # reintroduce it here.
             if attempt > 1:
-                # The device may have missed commands sent right after the port opened
-                # (e.g. while resetting on open): stop, settle, and start over.
                 await asyncio.to_thread(device.stop_streaming)
                 await asyncio.sleep(0.5)
                 await asyncio.to_thread(device.clear_buffers, True)
-                await asyncio.to_thread(device.configure_for_neurofeedback, DEFAULT_GAIN)
             await asyncio.to_thread(device.start_streaming)
             # read_samples returns as soon as it has FS_HZ samples, so the timeout
             # only matters when the device is slow or absent.
@@ -121,7 +120,7 @@ async def initialize_real_device(logger: logging.Logger) -> DeviceAcquisition:
                     attempt, exc, device.com_port, device.bytes_received, device.read_error_count,
                 )
                 continue
-            logger.info("Device stream validated: shape=%s, fs=%s, gain=%s", test_block.shape, FS_HZ, DEFAULT_GAIN)
+            logger.info("Device stream validated: shape=%s, fs=%s (gain left at device default)", test_block.shape, FS_HZ)
             return device
         raise DeviceDataError(
             f"{last_error} (port: {device.com_port}, raw bytes received: {device.bytes_received}, "
