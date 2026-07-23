@@ -24,6 +24,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 
 from signal_processing.device_acquisition import find_serial_port
+from signal_processing.device_debug import run_device_debug
 from signal_processing.payloads import build_error_payload
 from signal_processing.protocol_features import (
     parse_protocol_entry,
@@ -78,6 +79,42 @@ async def device_status() -> JSONResponse:
             "message": str(exc),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }, status_code=500)
+
+
+@router.websocket("/device_debug")
+async def device_debug(websocket: WebSocket) -> None:
+    """Stream a step-by-step device-connection diagnostic to the debug window."""
+    await websocket.accept()
+
+    lock = _get_nfcore_session_lock()
+    if lock.locked():
+        await websocket.send_json(build_error_payload(
+            "A neurofeedback session is running - stop it before running the device diagnostic"))
+        await websocket.close()
+        return
+
+    async with lock:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[dict] = asyncio.Queue()
+
+        def emit(event: dict) -> None:
+            loop.call_soon_threadsafe(queue.put_nowait, event)
+
+        worker = loop.run_in_executor(None, run_device_debug, emit)
+        try:
+            while True:
+                event = await queue.get()
+                if event.get("type") == "done":
+                    break
+                await websocket.send_json(event)
+        except WebSocketDisconnect:
+            logger.info("Device debug WebSocket disconnected mid-run")
+        finally:
+            await worker
+        try:
+            await websocket.close()
+        except Exception:
+            pass
 
 
 @router.websocket("/nfcore_start")
